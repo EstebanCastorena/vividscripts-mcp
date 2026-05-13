@@ -1,0 +1,97 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vividscripts-mcp"
+version = "0.1.0a0"
+description = "Remote MCP server for VividScripts. Lets Claude Code act as the AI brain for the 16-step story-to-video workflow."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Esteban Castorena", email = "estebancastorenajr@gmail.com" }
+]
+keywords = ["mcp", "model-context-protocol", "claude", "vividscripts", "oauth"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "mcp>=1.12,<2.0",
+    "pydantic>=2.7,<3.0",
+    "pydantic-settings>=2.3,<3.0",
+    "pyjwt[crypto]>=2.8,<3.0",
+    "httpx>=0.27,<1.0",
+    "starlette>=0.37,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "mypy>=1.10",
+    "ruff>=0.5",
+    "pre-commit>=3.7",
+    "types-requests",
+]
+
+[project.urls]
+Homepage = "https://github.com/EstebanCastorena/vividscripts-mcp"
+Issues = "https://github.com/EstebanCastorena/vividscripts-mcp/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vividscripts_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+]
+# TCH (type-checking imports) is off: Pydantic v2 needs runtime access to
+# annotation types, so we can't gate imports behind TYPE_CHECKING blocks.
+ignore = [
+    "E501",  # line too long (ruff format handles it)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+show_error_codes = true
+files = ["src/vividscripts_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+source = ["src/vividscripts_mcp"]
+branch = true

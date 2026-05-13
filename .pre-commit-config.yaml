@@ -1,0 +1,39 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.1
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - pydantic>=2.7
+          - types-requests
+        args: ["--strict", "src/vividscripts_mcp"]
+        # Type-check the whole package as a unit; don't let pre-commit pass
+        # individual file paths (would duplicate the module under `files:` filter).
+        pass_filenames: false
+        files: ^src/
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.0
+    hooks:
+      - id: gitleaks
+        # Catches accidentally committed secrets before they reach the
+        # remote. GitHub's native secret scanning is the backstop; this is
+        # the front line.
