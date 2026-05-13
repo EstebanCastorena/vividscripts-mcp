@@ -89,9 +89,9 @@ Cross-tenant access is impossible by design: a tool call against another user's 
 
 ---
 
-## Magic-link URL handoff
+## Auto-login URL handoff
 
-When a workflow finishes, the server returns a URL like `https://app.vividscripts.com/m/jR8k2x`. Clicking it auto-creates a browser session and lands the user in the editor. Same pattern Notion, Linear, and Vercel use for email magic-links.
+When a workflow finishes, the server returns a URL like `https://app.vividscripts.com/m/jR8k2x`. Clicking it creates a browser session and lands the user in the editor with their project loaded. The signed token in the URL is short-lived and single-use.
 
 ### Token format
 
@@ -218,7 +218,7 @@ grep -A1 "^permissions:" .github/workflows/ci.yml
 # → contents: read
 
 # 4. Bearer/JWT decoding uses explicit algorithm whitelist
-# (will be visible in src/vividscripts_mcp/oauth/ once Phase 1 lands)
+grep -rnE 'algorithms=\["(RS|HS)256"\]' src/   # will populate as the OAuth layer lands
 
 # 5. BackendProtocol takes user_id as the first parameter on every method
 grep "def " src/vividscripts_mcp/adapters/base.py | grep -v user_id || true

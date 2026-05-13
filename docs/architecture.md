@@ -36,13 +36,12 @@ How the VividScripts MCP server is put together, and why.
 ```
 
 **Intelligence Layer** (top): Claude Code. All reasoning lives here — story
-analysis, scene splitting, title writing, character bible construction, image
-prompt composition, SFX selection. Costs are paid by the user's Claude
-subscription.
+analysis, scene splitting, title writing, character consistency, image prompt
+composition, sound-effect selection.
 
-**Infrastructure Layer** (bottom): VividScripts. All media — TTS, Whisper,
-image generation, SFX generation, music, video compilation, project storage.
-Costs are paid by VividScripts.
+**Infrastructure Layer** (bottom): VividScripts. All media — text-to-speech,
+word-level transcription, image generation, sound-effect generation, music,
+video compilation, project storage.
 
 This package is the bridge.
 
@@ -132,16 +131,16 @@ Notes:
   access tokens and validate via JWKS. Fewer keys to manage.
 - **JWKS cached** for 1 hour.
 
-## Magic-link URL handoff
+## Auto-login URL handoff
 
-The "here's your URL" moment when the workflow finishes. The MCP returns
-something like `https://app.vividscripts.com/m/jR8k2x` and clicking it:
+When the workflow finishes, the server returns a URL like
+`https://app.vividscripts.com/m/jR8k2x`. Clicking it:
 
-1. Verifies a signed JWT (HS256, 5-min TTL, single-use via `jti` cache).
-2. Sets the Flask session as if the user just logged in.
-3. Redirects to `/studio?project=<name>` — editor opens with the project loaded.
+1. Verifies a signed JWT (HS256, 5-minute TTL, single-use via `jti` cache).
+2. Creates a browser session for the authenticated user.
+3. Redirects to `/studio?project=<name>` — the editor opens with the project loaded.
 
-Same pattern Notion, Linear, and Vercel use for email magic links.
+The user goes from "workflow done" to "viewing the result" in one click.
 
 ## Async job pattern
 
