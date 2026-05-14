@@ -23,6 +23,13 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from vividscripts_mcp.oauth.authorize import make_authorize_handler
+from vividscripts_mcp.oauth.bearer import (
+    JWKS_PATH,
+    InProcessJWKSProvider,
+    JWKSProvider,
+    jwks_endpoint,
+    validate_bearer_token,
+)
 from vividscripts_mcp.oauth.codes import (
     AuthCodeStore,
     AuthRequestStateStore,
@@ -74,6 +81,7 @@ def build_app(
     request_state_store: AuthRequestStateStore | None = None,
     code_store: AuthCodeStore | None = None,
     refresh_token_store: RefreshTokenStore | None = None,
+    jwks_provider: JWKSProvider | None = None,
 ) -> Starlette:
     """Assemble the ASGI app: Starlette host + mounted FastMCP streamable HTTP.
 
@@ -107,6 +115,12 @@ def build_app(
     resolved_refresh_token_store: RefreshTokenStore = (
         refresh_token_store if refresh_token_store is not None else MockRefreshTokenStore()
     )
+    resolved_jwks_provider: JWKSProvider = (
+        jwks_provider if jwks_provider is not None else InProcessJWKSProvider()
+    )
+
+    def _validate(token: str) -> object | None:
+        return validate_bearer_token(token, resolved_jwks_provider)
 
     mcp = create_mcp_server()
     inner = mcp.streamable_http_app()
@@ -114,6 +128,7 @@ def build_app(
         routes=[
             Route("/health", endpoint=health, methods=["GET"]),
             Route(PRM_PATH, endpoint=protected_resource_metadata, methods=["GET"]),
+            Route(JWKS_PATH, endpoint=jwks_endpoint, methods=["GET"]),
             Route(
                 "/oauth/register",
                 endpoint=make_register_handler(resolved_client_store, resolved_session_store),
@@ -146,6 +161,6 @@ def build_app(
             ),
             Mount("/", app=inner),
         ],
-        middleware=[Middleware(BearerEnforcementMiddleware)],
+        middleware=[Middleware(BearerEnforcementMiddleware, validator=_validate)],
         lifespan=inner.router.lifespan_context,
     )
