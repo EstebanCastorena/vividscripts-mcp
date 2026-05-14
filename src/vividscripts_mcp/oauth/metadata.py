@@ -1,0 +1,133 @@
+"""OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728, KAN-48).
+
+RFC 9728 lets MCP clients (Claude Code) auto-discover the authorization
+servers they should authenticate against. The flow:
+
+1. Client hits ``/mcp`` without a Bearer token.
+2. Server returns ``401`` with ``WWW-Authenticate: Bearer
+   resource_metadata="https://<host>/.well-known/oauth-protected-resource"``.
+3. Client fetches that URL → gets back the JSON document this module serves.
+4. Client uses the ``authorization_servers`` field to discover OAuth endpoints
+   (DCR, authorize, token) and complete the auth dance.
+
+Phase 1 ships placeholder issuer + AS URLs. Production wiring (Cognito issuer,
+real deployment host) lands in Phase 3.
+"""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, ConfigDict
+from starlette.datastructures import Headers
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+#: Path the PRM document is served from. Per RFC 9728 § 3.1 the well-known
+#: suffix is ``oauth-protected-resource``.
+PRM_PATH = "/.well-known/oauth-protected-resource"
+
+#: Canonical identifier of the protected resource (the MCP endpoint). Phase 1
+#: placeholder; production binds this to the real deployment host.
+_RESOURCE = "https://app.vividscripts.com/mcp"
+
+#: Issuer identifiers of the OAuth authorization servers that mint tokens for
+#: this resource. Phase 1 placeholder; production lists the Cognito issuer.
+_AUTHORIZATION_SERVERS: tuple[str, ...] = ("https://app.vividscripts.com",)
+
+#: GitHub URL of the human-readable auth docs (KAN-55 writes the page).
+_RESOURCE_DOCUMENTATION = (
+    "https://github.com/EstebanCastorena/vividscripts-mcp/blob/main/docs/auth.md"
+)
+
+
+class ProtectedResourceMetadata(BaseModel):
+    """RFC 9728 Protected Resource Metadata document.
+
+    Only the fields the ticket called out are exposed; extra keys are
+    forbidden so schema drift surfaces immediately in tests.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resource: str
+    authorization_servers: list[str]
+    bearer_methods_supported: list[str]
+    resource_documentation: str
+    scopes_supported: list[str]
+    resource_signing_alg_values_supported: list[str]
+
+
+def build_prm_payload() -> ProtectedResourceMetadata:
+    """Return the Phase 1 PRM document with placeholder issuer + AS URLs."""
+    return ProtectedResourceMetadata(
+        resource=_RESOURCE,
+        authorization_servers=list(_AUTHORIZATION_SERVERS),
+        bearer_methods_supported=["header"],
+        resource_documentation=_RESOURCE_DOCUMENTATION,
+        scopes_supported=["openid", "profile", "email"],
+        resource_signing_alg_values_supported=["RS256"],
+    )
+
+
+async def protected_resource_metadata(_request: Request) -> JSONResponse:
+    """Serve the PRM document at ``GET /.well-known/oauth-protected-resource``."""
+    return JSONResponse(build_prm_payload().model_dump())
+
+
+def _is_mcp_path(path: str) -> bool:
+    """The Streamable HTTP transport mounts at ``/mcp`` (with optional subpaths)."""
+    return path == "/mcp" or path.startswith("/mcp/")
+
+
+def _has_bearer(headers: Headers) -> bool:
+    auth = headers.get("authorization", "")
+    return auth.lower().startswith("bearer ")
+
+
+def _metadata_url(scope: Scope) -> str:
+    """Build the absolute URL of the PRM endpoint from the ASGI scope.
+
+    Using the request's own host means a real client behind any deployment
+    URL (or a TestClient pointing at ``http://testserver``) gets back a
+    self-consistent ``resource_metadata`` URL it can actually fetch.
+    """
+    headers = Headers(scope=scope)
+    host = headers.get("host")
+    if host is None:
+        server = scope.get("server") or ("localhost", 80)
+        host = f"{server[0]}:{server[1]}"
+    scheme = scope.get("scheme", "http")
+    return f"{scheme}://{host}{PRM_PATH}"
+
+
+class BearerEnforcementMiddleware:
+    """Reject unauthenticated ``/mcp`` requests with 401 + WWW-Authenticate.
+
+    This is the discovery on-ramp for OAuth: a naked request to the MCP
+    endpoint earns a ``401`` whose ``WWW-Authenticate`` header tells the
+    client where to fetch the PRM document (RFC 6750 § 3 + RFC 9728 § 5.1).
+
+    Phase 1 only checks for the *presence* of a Bearer token — anything
+    non-empty passes through. Cryptographic validation (JWKS, audience,
+    issuer, expiry) lands in KAN-52 and will plug into this same layer.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if _is_mcp_path(path) and not _has_bearer(Headers(scope=scope)):
+            challenge = f'Bearer resource_metadata="{_metadata_url(scope)}"'
+            response = Response(
+                status_code=401,
+                headers={"WWW-Authenticate": challenge},
+            )
+            await response(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
