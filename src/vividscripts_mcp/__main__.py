@@ -7,6 +7,13 @@ Usage::
 Phase 1 supports a single subcommand (``serve``) and a single backend (mock).
 The ``--backend`` flag is reserved for KAN-31 (Phase 3), when the real
 VividScripts backend adapter lands.
+
+The ``--seed-session`` flag pre-creates a mock session at boot so you can
+exercise the OAuth flow (which requires a session-cookie for Dynamic
+Client Registration) without first walking the mock-IdP login. Useful
+for manual end-to-end testing while Phase 1 has no real web app to log in
+to. The flag prints the cookie value to stdout so you can paste it into
+curl.
 """
 
 from __future__ import annotations
@@ -42,15 +49,44 @@ def main(argv: list[str] | None = None) -> int:
         default="mock",
         help="Backend implementation to use (default: mock)",
     )
+    serve.add_argument(
+        "--seed-session",
+        metavar="USER_ID",
+        default=None,
+        help=(
+            "Pre-create a mock session for the given user id and print "
+            "the vs_session cookie value. Phase-1 dev shortcut; not for "
+            "production."
+        ),
+    )
 
     args = parser.parse_args(argv)
 
     if args.command == "serve":
         import uvicorn
 
+        from vividscripts_mcp.oauth.session import (
+            SESSION_COOKIE_NAME,
+            MockSessionStore,
+        )
         from vividscripts_mcp.server import build_app
 
-        uvicorn.run(build_app(), host=args.host, port=args.port)
+        session_store = MockSessionStore()
+        if args.seed_session is not None:
+            info = session_store.create(user_id=args.seed_session)
+            print(
+                f"Seeded mock session for user {args.seed_session!r}.\n"
+                f"  Cookie: {SESSION_COOKIE_NAME}={info.session_id}\n"
+                "  Use it on /oauth/register, e.g.:\n"
+                f"    curl -H 'Cookie: {SESSION_COOKIE_NAME}={info.session_id}' ...",
+                flush=True,
+            )
+
+        uvicorn.run(
+            build_app(session_store=session_store),
+            host=args.host,
+            port=args.port,
+        )
         return 0
 
     return 1
