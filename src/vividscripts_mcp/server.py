@@ -1,0 +1,64 @@
+"""MCP Streamable HTTP server entrypoint (KAN-47).
+
+The server is a Starlette ASGI app composed of two pieces:
+
+1. Application-level routes — currently just ``/health``. The OAuth surface
+   (KAN-48 protected-resource metadata, KAN-49 dynamic client registration,
+   KAN-50 authorize, KAN-51 token) attaches additional routes here.
+2. The MCP server's Streamable HTTP transport, mounted at the root so the
+   default ``/mcp`` path resolves correctly for clients.
+
+Phase 1's tool surface is intentionally minimal — ``list_workflow_steps``
+ships as an empty stub to exercise the wire protocol. Backend-dispatching
+tools land starting with KAN-53 (project tools) and KAN-30 (Phase 2 prompts).
+"""
+
+from __future__ import annotations
+
+from mcp.server.fastmcp import FastMCP
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+
+SERVER_NAME = "vividscripts-mcp"
+
+
+def create_mcp_server() -> FastMCP:
+    """Construct a FastMCP server with the Phase 1 tool surface."""
+    mcp = FastMCP(SERVER_NAME)
+
+    @mcp.tool()
+    def list_workflow_steps() -> list[dict[str, str]]:
+        """List the VividScripts workflow steps.
+
+        Phase 1 returns an empty list to satisfy the wire protocol. KAN-30
+        (Phase 2) will dispatch through the backend and return the real
+        16-step pipeline definitions.
+        """
+        return []
+
+    return mcp
+
+
+async def health(_request: Request) -> JSONResponse:
+    """Liveness probe. No auth, no MCP — confirms the process is up."""
+    return JSONResponse({"status": "ok"})
+
+
+def build_app() -> Starlette:
+    """Assemble the ASGI app: Starlette host + mounted FastMCP streamable HTTP.
+
+    The MCP transport carries its own lifespan handler (initializes the
+    session manager); we propagate it to the outer Starlette app so the
+    transport starts and stops cleanly with the host process.
+    """
+    mcp = create_mcp_server()
+    inner = mcp.streamable_http_app()
+    return Starlette(
+        routes=[
+            Route("/health", endpoint=health, methods=["GET"]),
+            Mount("/", app=inner),
+        ],
+        lifespan=inner.router.lifespan_context,
+    )
