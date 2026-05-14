@@ -39,6 +39,8 @@ from vividscripts_mcp.oauth.mock_idp import LOGIN_PATH as MOCK_IDP_LOGIN_PATH
 from vividscripts_mcp.oauth.mock_idp import make_login_handler
 from vividscripts_mcp.oauth.session import MockSessionStore, SessionStore
 from vividscripts_mcp.oauth.store import ClientStore, MockClientStore
+from vividscripts_mcp.oauth.token import make_token_handler
+from vividscripts_mcp.oauth.tokens import MockRefreshTokenStore, RefreshTokenStore
 
 SERVER_NAME = "vividscripts-mcp"
 
@@ -71,6 +73,7 @@ def build_app(
     session_store: SessionStore | None = None,
     request_state_store: AuthRequestStateStore | None = None,
     code_store: AuthCodeStore | None = None,
+    refresh_token_store: RefreshTokenStore | None = None,
 ) -> Starlette:
     """Assemble the ASGI app: Starlette host + mounted FastMCP streamable HTTP.
 
@@ -101,6 +104,9 @@ def build_app(
     resolved_code_store: AuthCodeStore = (
         code_store if code_store is not None else MockAuthCodeStore()
     )
+    resolved_refresh_token_store: RefreshTokenStore = (
+        refresh_token_store if refresh_token_store is not None else MockRefreshTokenStore()
+    )
 
     mcp = create_mcp_server()
     inner = mcp.streamable_http_app()
@@ -119,6 +125,15 @@ def build_app(
                     resolved_client_store, resolved_request_state_store
                 ),
                 methods=["GET"],
+            ),
+            Route(
+                "/oauth/token",
+                endpoint=make_token_handler(
+                    resolved_client_store,
+                    resolved_code_store,
+                    resolved_refresh_token_store,
+                ),
+                methods=["POST"],
             ),
             Route(
                 MOCK_IDP_LOGIN_PATH,
