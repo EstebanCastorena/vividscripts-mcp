@@ -22,6 +22,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
+from vividscripts_mcp.adapters.base import BackendProtocol
+from vividscripts_mcp.adapters.mock import MockBackend
 from vividscripts_mcp.oauth.authorize import make_authorize_handler
 from vividscripts_mcp.oauth.bearer import (
     JWKS_PATH,
@@ -48,12 +50,22 @@ from vividscripts_mcp.oauth.session import MockSessionStore, SessionStore
 from vividscripts_mcp.oauth.store import ClientStore, MockClientStore
 from vividscripts_mcp.oauth.token import make_token_handler
 from vividscripts_mcp.oauth.tokens import MockRefreshTokenStore, RefreshTokenStore
+from vividscripts_mcp.tools.projects import (
+    make_create_project_tool,
+    make_get_project_tool,
+    make_list_projects_tool,
+)
 
 SERVER_NAME = "vividscripts-mcp"
 
 
-def create_mcp_server() -> FastMCP:
-    """Construct a FastMCP server with the Phase 1 tool surface."""
+def create_mcp_server(backend: BackendProtocol) -> FastMCP:
+    """Construct a FastMCP server with the Phase 1 tool surface.
+
+    ``backend`` is injected so the project-management tools (KAN-53) can
+    dispatch user-scoped storage operations. The workflow-step stub
+    doesn't use it yet — that wiring lands in KAN-30 (Phase 2).
+    """
     mcp = FastMCP(SERVER_NAME)
 
     @mcp.tool()
@@ -66,6 +78,11 @@ def create_mcp_server() -> FastMCP:
         """
         return []
 
+    # KAN-53 project tools — user-scoped, Bearer-authenticated.
+    mcp.tool()(make_create_project_tool(backend))
+    mcp.tool()(make_list_projects_tool(backend))
+    mcp.tool()(make_get_project_tool(backend))
+
     return mcp
 
 
@@ -76,6 +93,7 @@ async def health(_request: Request) -> JSONResponse:
 
 def build_app(
     *,
+    backend: BackendProtocol | None = None,
     client_store: ClientStore | None = None,
     session_store: SessionStore | None = None,
     request_state_store: AuthRequestStateStore | None = None,
@@ -118,11 +136,12 @@ def build_app(
     resolved_jwks_provider: JWKSProvider = (
         jwks_provider if jwks_provider is not None else InProcessJWKSProvider()
     )
+    resolved_backend: BackendProtocol = backend if backend is not None else MockBackend()
 
     def _validate(token: str) -> object | None:
         return validate_bearer_token(token, resolved_jwks_provider)
 
-    mcp = create_mcp_server()
+    mcp = create_mcp_server(resolved_backend)
     inner = mcp.streamable_http_app()
     return Starlette(
         routes=[
