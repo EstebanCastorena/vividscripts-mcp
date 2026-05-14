@@ -22,12 +22,21 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
+from vividscripts_mcp.oauth.authorize import make_authorize_handler
+from vividscripts_mcp.oauth.codes import (
+    AuthCodeStore,
+    AuthRequestStateStore,
+    MockAuthCodeStore,
+    MockAuthRequestStateStore,
+)
 from vividscripts_mcp.oauth.dcr import make_register_handler
 from vividscripts_mcp.oauth.metadata import (
     PRM_PATH,
     BearerEnforcementMiddleware,
     protected_resource_metadata,
 )
+from vividscripts_mcp.oauth.mock_idp import LOGIN_PATH as MOCK_IDP_LOGIN_PATH
+from vividscripts_mcp.oauth.mock_idp import make_login_handler
 from vividscripts_mcp.oauth.session import MockSessionStore, SessionStore
 from vividscripts_mcp.oauth.store import ClientStore, MockClientStore
 
@@ -60,12 +69,14 @@ def build_app(
     *,
     client_store: ClientStore | None = None,
     session_store: SessionStore | None = None,
+    request_state_store: AuthRequestStateStore | None = None,
+    code_store: AuthCodeStore | None = None,
 ) -> Starlette:
     """Assemble the ASGI app: Starlette host + mounted FastMCP streamable HTTP.
 
     Route order matters: ``/health`` and the OAuth surface (PRM document,
-    DCR endpoint) are matched before the catch-all MCP Mount. The
-    :class:`BearerEnforcementMiddleware` short-circuits naked ``/mcp``
+    DCR, authorize, mock IdP) are matched before the catch-all MCP Mount.
+    The :class:`BearerEnforcementMiddleware` short-circuits naked ``/mcp``
     requests with a 401 + ``WWW-Authenticate`` header so Claude Code can
     discover the PRM endpoint and bootstrap OAuth.
 
@@ -73,15 +84,22 @@ def build_app(
     session manager); we propagate it to the outer Starlette app so the
     transport starts and stops cleanly with the host process.
 
-    ``client_store`` and ``session_store`` are injectable so tests can
-    pre-populate them and inspect persisted state. Both default to in-memory
-    mocks when omitted — appropriate for the Phase 1 dev server.
+    All four stores are injectable so tests can pre-populate them and
+    inspect persisted state. They default to in-memory mocks — appropriate
+    for the Phase 1 dev server; Phase 3 swaps the mocks for production
+    backings (Cognito sessions, Secrets Manager clients).
     """
     resolved_client_store: ClientStore = (
         client_store if client_store is not None else MockClientStore()
     )
     resolved_session_store: SessionStore = (
         session_store if session_store is not None else MockSessionStore()
+    )
+    resolved_request_state_store: AuthRequestStateStore = (
+        request_state_store if request_state_store is not None else MockAuthRequestStateStore()
+    )
+    resolved_code_store: AuthCodeStore = (
+        code_store if code_store is not None else MockAuthCodeStore()
     )
 
     mcp = create_mcp_server()
@@ -94,6 +112,22 @@ def build_app(
                 "/oauth/register",
                 endpoint=make_register_handler(resolved_client_store, resolved_session_store),
                 methods=["POST"],
+            ),
+            Route(
+                "/oauth/authorize",
+                endpoint=make_authorize_handler(
+                    resolved_client_store, resolved_request_state_store
+                ),
+                methods=["GET"],
+            ),
+            Route(
+                MOCK_IDP_LOGIN_PATH,
+                endpoint=make_login_handler(
+                    resolved_session_store,
+                    resolved_request_state_store,
+                    resolved_code_store,
+                ),
+                methods=["GET", "POST"],
             ),
             Mount("/", app=inner),
         ],
