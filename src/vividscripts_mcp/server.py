@@ -17,9 +17,16 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
+
+from vividscripts_mcp.oauth.metadata import (
+    PRM_PATH,
+    BearerEnforcementMiddleware,
+    protected_resource_metadata,
+)
 
 SERVER_NAME = "vividscripts-mcp"
 
@@ -49,6 +56,12 @@ async def health(_request: Request) -> JSONResponse:
 def build_app() -> Starlette:
     """Assemble the ASGI app: Starlette host + mounted FastMCP streamable HTTP.
 
+    Route order matters: ``/health`` and the OAuth surface (PRM document)
+    are matched before the catch-all MCP Mount. The
+    :class:`BearerEnforcementMiddleware` short-circuits naked ``/mcp``
+    requests with a 401 + ``WWW-Authenticate`` header so Claude Code can
+    discover the PRM endpoint and bootstrap OAuth.
+
     The MCP transport carries its own lifespan handler (initializes the
     session manager); we propagate it to the outer Starlette app so the
     transport starts and stops cleanly with the host process.
@@ -58,7 +71,9 @@ def build_app() -> Starlette:
     return Starlette(
         routes=[
             Route("/health", endpoint=health, methods=["GET"]),
+            Route(PRM_PATH, endpoint=protected_resource_metadata, methods=["GET"]),
             Mount("/", app=inner),
         ],
+        middleware=[Middleware(BearerEnforcementMiddleware)],
         lifespan=inner.router.lifespan_context,
     )
