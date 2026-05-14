@@ -16,6 +16,9 @@ real deployment host) lands in Phase 3.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict
 from starlette.datastructures import Headers
 from starlette.requests import Request
@@ -84,6 +87,14 @@ def _has_bearer(headers: Headers) -> bool:
     return auth.lower().startswith("bearer ")
 
 
+def _extract_bearer(headers: Headers) -> str | None:
+    auth = headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return None
+    token = auth[len("bearer ") :].strip()
+    return token or None
+
+
 def _metadata_url(scope: Scope) -> str:
     """Build the absolute URL of the PRM endpoint from the ASGI scope.
 
@@ -100,20 +111,37 @@ def _metadata_url(scope: Scope) -> str:
     return f"{scheme}://{host}{PRM_PATH}"
 
 
+#: Type alias for the Bearer validator callable. Returns user claims on
+#: success, ``None`` on any rejection. KAN-52 wires this in.
+BearerValidator = Callable[[str], Any | None]
+
+
 class BearerEnforcementMiddleware:
-    """Reject unauthenticated ``/mcp`` requests with 401 + WWW-Authenticate.
+    """Reject unauthenticated or invalid ``/mcp`` requests with 401 + WWW-Authenticate.
 
-    This is the discovery on-ramp for OAuth: a naked request to the MCP
-    endpoint earns a ``401`` whose ``WWW-Authenticate`` header tells the
-    client where to fetch the PRM document (RFC 6750 § 3 + RFC 9728 § 5.1).
+    The middleware enforces two layers on /mcp:
 
-    Phase 1 only checks for the *presence* of a Bearer token — anything
-    non-empty passes through. Cryptographic validation (JWKS, audience,
-    issuer, expiry) lands in KAN-52 and will plug into this same layer.
+    1. **Presence.** Any request without ``Authorization: Bearer <...>``
+       earns a 401 whose ``WWW-Authenticate`` header points clients at
+       the PRM document (RFC 6750 § 3 + RFC 9728 § 5.1).
+    2. **Validity** (when a ``validator`` is configured — KAN-52). The
+       Bearer token is cryptographically verified (signature, audience,
+       issuer, ``token_use``, expiry). On rejection, the response is a
+       401 with ``error="invalid_token"`` in the ``WWW-Authenticate``
+       header per RFC 6750 § 3.1.
+
+    Validated user claims are stashed on the ASGI scope under
+    ``scope["state"]["bearer_claims"]`` so downstream tool handlers can
+    read the authenticated user without re-validating.
     """
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        validator: BearerValidator | None = None,
+    ) -> None:
         self.app = app
+        self.validator = validator
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -121,13 +149,42 @@ class BearerEnforcementMiddleware:
             return
 
         path = scope.get("path", "")
-        if _is_mcp_path(path) and not _has_bearer(Headers(scope=scope)):
-            challenge = f'Bearer resource_metadata="{_metadata_url(scope)}"'
-            response = Response(
-                status_code=401,
-                headers={"WWW-Authenticate": challenge},
-            )
-            await response(scope, receive, send)
+        if not _is_mcp_path(path):
+            await self.app(scope, receive, send)
             return
 
+        headers = Headers(scope=scope)
+        token = _extract_bearer(headers)
+        if token is None:
+            await self._unauthenticated(scope, receive, send)
+            return
+
+        if self.validator is not None:
+            claims = self.validator(token)
+            if claims is None:
+                await self._unauthenticated(scope, receive, send, error="invalid_token")
+                return
+            # Stash claims for downstream tools. We mutate the state dict
+            # rather than the scope's other keys to stay within Starlette's
+            # contract for middleware-to-handler state passing.
+            state = scope.setdefault("state", {})
+            if isinstance(state, dict):
+                state["bearer_claims"] = claims
+
         await self.app(scope, receive, send)
+
+    async def _unauthenticated(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        error: str | None = None,
+    ) -> None:
+        challenge = f'Bearer resource_metadata="{_metadata_url(scope)}"'
+        if error is not None:
+            challenge += f', error="{error}"'
+        response = Response(
+            status_code=401,
+            headers={"WWW-Authenticate": challenge},
+        )
+        await response(scope, receive, send)

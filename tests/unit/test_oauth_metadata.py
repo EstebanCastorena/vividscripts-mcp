@@ -60,15 +60,17 @@ def test_unauthed_mcp_returns_401_with_www_authenticate() -> None:
 
 
 def test_bearer_present_mcp_does_not_401_from_middleware() -> None:
-    """A request carrying a Bearer header passes the KAN-48 enforcement layer.
+    """A request carrying a valid Bearer JWT passes the auth middleware.
 
-    Real validation (signature, audience, expiry) is KAN-52's job. This test
-    only proves the KAN-48 middleware lets Bearer-bearing requests through —
-    the downstream MCP transport may still reject the request for protocol
-    reasons (GET vs POST, missing headers), but the rejection must not be a
-    401 originating from this layer.
+    KAN-52 introduced real validation, so a placeholder token now correctly
+    fails — the meaningful assertion is that a *valid* token reaches the
+    inner MCP transport (which may then reject the request for unrelated
+    protocol reasons like GET-vs-POST, but not with a 401 from this layer).
     """
+    from vividscripts_mcp.oauth.tokens import mint_access_token
+
+    token, _ = mint_access_token(user_id="user-alpha", client_id="some-client")
     with TestClient(build_app()) as client:
-        response = client.get("/mcp", headers={"Authorization": "Bearer placeholder"})
+        response = client.get("/mcp", headers={"Authorization": f"Bearer {token}"})
 
     assert response.status_code != 401
