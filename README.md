@@ -1,6 +1,6 @@
 # vividscripts-mcp
 
-> Remote MCP server for [VividScripts](https://app.vividscripts.com) — turn written stories into produced videos directly from [Claude Code](https://claude.com/claude-code).
+> Remote MCP server for [VividScripts](https://vividscripts.ai/) — turn written stories into produced videos directly from [Claude Code](https://claude.com/claude-code).
 
 [![CI](https://github.com/EstebanCastorena/vividscripts-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/EstebanCastorena/vividscripts-mcp/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -71,6 +71,6 @@ MIT — see [`LICENSE`](LICENSE).
 
 ## Related
 
-- VividScripts: [app.vividscripts.com](https://app.vividscripts.com)
+- VividScripts: [vividscripts.ai](https://vividscripts.ai/)
 - Model Context Protocol: [modelcontextprotocol.io](https://modelcontextprotocol.io)
 - Anthropic MCP Python SDK: [github.com/modelcontextprotocol/python-sdk](https://github.com/modelcontextprotocol/python-sdk)
