@@ -170,6 +170,14 @@ class BearerEnforcementMiddleware:
             state = scope.setdefault("state", {})
             if isinstance(state, dict):
                 state["bearer_claims"] = claims
+            # Bind the contextvar so MCP tool handlers can read the user
+            # without plumbing the ASGI scope through FastMCP internals.
+            # Late import: oauth.context depends on oauth.bearer.UserClaims;
+            # a top-level import here would force every metadata.py consumer
+            # to drag in the JWT machinery.
+            from vividscripts_mcp.oauth.context import set_user_claims
+
+            set_user_claims(claims)
 
         await self.app(scope, receive, send)
 

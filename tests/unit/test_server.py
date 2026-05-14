@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from starlette.testclient import TestClient
 
+from vividscripts_mcp.adapters.mock import MockBackend
 from vividscripts_mcp.server import build_app, create_mcp_server
 
 
@@ -32,7 +33,7 @@ def test_mcp_endpoint_mounted() -> None:
 
 async def test_list_workflow_steps_tool_is_registered() -> None:
     """The list_workflow_steps tool is exposed via FastMCP's tool catalog."""
-    mcp = create_mcp_server()
+    mcp = create_mcp_server(MockBackend())
     tools = await mcp.list_tools()
     names = {tool.name for tool in tools}
     assert "list_workflow_steps" in names
@@ -40,7 +41,7 @@ async def test_list_workflow_steps_tool_is_registered() -> None:
 
 async def test_list_workflow_steps_returns_empty_in_phase_1() -> None:
     """Phase 1's stub returns an empty list. KAN-30 will replace this."""
-    mcp = create_mcp_server()
+    mcp = create_mcp_server(MockBackend())
     result = await mcp.call_tool("list_workflow_steps", {})
     # FastMCP returns (content_blocks, structured_payload). The structured
     # payload is what tool callers consume; for a list return type it wraps
