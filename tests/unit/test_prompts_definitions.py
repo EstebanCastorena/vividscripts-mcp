@@ -96,9 +96,9 @@ def test_descriptions_are_substantive() -> None:
     """Each description should be a real paragraph, not a placeholder."""
     for interface in PROMPT_INTERFACES.values():
         # At least 100 chars — a one-paragraph agent description
-        assert (
-            len(interface.description) >= 100
-        ), f"{interface.name}: description too short ({len(interface.description)} chars)"
+        assert len(interface.description) >= 100, (
+            f"{interface.name}: description too short ({len(interface.description)} chars)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -125,17 +125,17 @@ def test_input_schemas_are_valid_json_schema_draft_2020_12() -> None:
 def test_input_schemas_are_objects() -> None:
     """All input schemas describe an object (the context dict shape)."""
     for interface in PROMPT_INTERFACES.values():
-        assert (
-            interface.input_schema.get("type") == "object"
-        ), f"{interface.name}: input_schema.type must be 'object'"
+        assert interface.input_schema.get("type") == "object", (
+            f"{interface.name}: input_schema.type must be 'object'"
+        )
 
 
 def test_input_schemas_forbid_additional_properties() -> None:
     """Strict input contracts: unknown context fields fail loudly."""
     for interface in PROMPT_INTERFACES.values():
-        assert (
-            interface.input_schema.get("additionalProperties") is False
-        ), f"{interface.name}: input_schema must forbid additionalProperties"
+        assert interface.input_schema.get("additionalProperties") is False, (
+            f"{interface.name}: input_schema must forbid additionalProperties"
+        )
 
 
 def test_input_schemas_have_at_least_one_property() -> None:
@@ -155,9 +155,9 @@ ALLOWED_LOOPS_OVER = frozenset({None, "story", "paragraph", "scene", "segment"})
 
 def test_loops_over_in_allowed_set() -> None:
     for interface in PROMPT_INTERFACES.values():
-        assert (
-            interface.loops_over in ALLOWED_LOOPS_OVER
-        ), f"{interface.name}: loops_over={interface.loops_over!r} not in {ALLOWED_LOOPS_OVER}"
+        assert interface.loops_over in ALLOWED_LOOPS_OVER, (
+            f"{interface.name}: loops_over={interface.loops_over!r} not in {ALLOWED_LOOPS_OVER}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -170,16 +170,16 @@ def test_depends_on_references_are_valid() -> None:
     all_names = set(PROMPT_INTERFACES.keys())
     for interface in PROMPT_INTERFACES.values():
         for dep in interface.depends_on:
-            assert (
-                dep in all_names
-            ), f"{interface.name}: depends_on references unknown prompt {dep!r}"
+            assert dep in all_names, (
+                f"{interface.name}: depends_on references unknown prompt {dep!r}"
+            )
 
 
 def test_no_self_dependency() -> None:
     for interface in PROMPT_INTERFACES.values():
-        assert (
-            interface.name not in interface.depends_on
-        ), f"{interface.name}: cannot depend on itself"
+        assert interface.name not in interface.depends_on, (
+            f"{interface.name}: cannot depend on itself"
+        )
 
 
 def test_depends_on_graph_is_acyclic() -> None:
@@ -201,9 +201,9 @@ def test_depends_on_graph_is_acyclic() -> None:
             if in_degree[child] == 0:
                 queue.append(child)
 
-    assert visited == len(
-        PROMPT_INTERFACES
-    ), f"cycle detected in depends_on graph (visited {visited}/{len(PROMPT_INTERFACES)})"
+    assert visited == len(PROMPT_INTERFACES), (
+        f"cycle detected in depends_on graph (visited {visited}/{len(PROMPT_INTERFACES)})"
+    )
 
 
 def test_root_prompts_match_expectations() -> None:
