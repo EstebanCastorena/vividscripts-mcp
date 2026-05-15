@@ -45,6 +45,7 @@ dev = [
     "ruff>=0.5",
     "pre-commit>=3.7",
     "types-requests",
+    "types-jsonschema",
 ]
 
 [project.urls]
