@@ -39,12 +39,14 @@ async def test_list_workflow_steps_tool_is_registered() -> None:
     assert "list_workflow_steps" in names
 
 
-async def test_list_workflow_steps_returns_empty_in_phase_1() -> None:
-    """Phase 1's stub returns an empty list. KAN-30 will replace this."""
+async def test_list_workflow_steps_serves_backend_catalog() -> None:
+    """KAN-58 replaced Phase 1's `return []` stub with the backend catalog.
+
+    (Was test_list_workflow_steps_returns_empty_in_phase_1; the empty-list
+    contract is gone — the tool now serves backend.list_workflow_steps().)
+    """
     mcp = create_mcp_server(MockBackend())
-    result = await mcp.call_tool("list_workflow_steps", {})
-    # FastMCP returns (content_blocks, structured_payload). The structured
-    # payload is what tool callers consume; for a list return type it wraps
-    # the list under the "result" key.
-    _, structured = result
-    assert structured == {"result": []}
+    _content, structured = await mcp.call_tool("list_workflow_steps", {})
+    steps = structured["result"]
+    assert isinstance(steps, list)
+    assert len(steps) > 0, "stub is gone — the catalog must be non-empty"

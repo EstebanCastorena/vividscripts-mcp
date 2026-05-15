@@ -55,6 +55,7 @@ from vividscripts_mcp.tools.projects import (
     make_get_project_tool,
     make_list_projects_tool,
 )
+from vividscripts_mcp.tools.prompts import register_prompts
 
 SERVER_NAME = "vividscripts-mcp"
 
@@ -68,20 +69,14 @@ def create_mcp_server(backend: BackendProtocol) -> FastMCP:
     """
     mcp = FastMCP(SERVER_NAME)
 
-    @mcp.tool()
-    def list_workflow_steps() -> list[dict[str, str]]:
-        """List the VividScripts workflow steps.
-
-        Phase 1 returns an empty list to satisfy the wire protocol. KAN-30
-        (Phase 2) will dispatch through the backend and return the real
-        16-step pipeline definitions.
-        """
-        return []
-
     # KAN-53 project tools — user-scoped, Bearer-authenticated.
     mcp.tool()(make_create_project_tool(backend))
     mcp.tool()(make_list_projects_tool(backend))
     mcp.tool()(make_get_project_tool(backend))
+
+    # KAN-58 — 20 MCP Prompts + the backend-served list_workflow_steps
+    # (replaces Phase 1's empty-list stub).
+    register_prompts(mcp, backend)
 
     return mcp
 
