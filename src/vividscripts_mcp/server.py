@@ -56,6 +56,7 @@ from vividscripts_mcp.tools.projects import (
     make_list_projects_tool,
 )
 from vividscripts_mcp.tools.prompts import register_prompts
+from vividscripts_mcp.tools.state import register_state_tools
 
 SERVER_NAME = "vividscripts-mcp"
 
@@ -77,6 +78,9 @@ def create_mcp_server(backend: BackendProtocol) -> FastMCP:
     # KAN-58 — 20 MCP Prompts + the backend-served list_workflow_steps
     # (replaces Phase 1's empty-list stub).
     register_prompts(mcp, backend)
+
+    # KAN-59 — save_step_result + get_workflow_state + custom overrides.
+    register_state_tools(mcp, backend)
 
     return mcp
 
