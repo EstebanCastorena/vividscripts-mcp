@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "ordinary_setup": {
+      "type": "string"
+    },
+    "setting": {
+      "type": "string"
+    },
+    "inciting_incident": {
+      "type": "string"
+    },
+    "emotion": {
+      "type": "string"
+    },
+    "looming_consequence_hint": {
+      "type": "string"
+    },
+    "banned_details": {
+      "type": "string"
+    },
+    "short_summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "short_summary"
+  ]
+}
