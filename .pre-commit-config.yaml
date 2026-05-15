@@ -29,6 +29,8 @@ repos:
           - uvicorn>=0.30
           - pyjwt[crypto]>=2.8
           - cryptography>=42
+          - jsonschema>=4.0
+          - types-jsonschema
         args: ["--strict", "src/vividscripts_mcp"]
         # Type-check the whole package as a unit; don't let pre-commit pass
         # individual file paths (would duplicate the module under `files:` filter).
