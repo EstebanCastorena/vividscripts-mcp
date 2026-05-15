@@ -153,3 +153,10 @@ generate_images(project_id, scenes_with_prompts, style) → {job_id: "..."}
 Claude Code subscribes to `vividscripts://jobs/{job_id}` and receives
 streaming status updates over the MCP transport. Job status is persisted
 on the server so workflows survive crashes and session disconnects.
+
+## Prompt reference
+
+The 20 AI consultation points are documented interface-only in
+[`docs/prompts.md`](prompts.md) — purpose, input context, output schema,
+loop cadence, and dependency order for each. Prompt bodies stay in the
+production backend; the schemas are the integration contract.

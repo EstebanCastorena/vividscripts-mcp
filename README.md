@@ -39,7 +39,7 @@ The package in this repo is the bridge between them. See [`docs/architecture.md`
 ## What's in the package
 
 - **OAuth 2.1 with Dynamic Client Registration (RFC 7591)** with PKCE, backed by AWS Cognito. Single browser authorization; no manual key management. See [`docs/auth.md`](docs/auth.md) for the full flow, security guarantees, and a `curl` walkthrough.
-- **MCP Tools, Resources, and Prompts** exposed as the spec defines them: ~22 Tools for actions and asynchronous jobs, ~10 Resources for read-only project data with `subscribe` for live status updates, 19 Prompts for parameterized AI templates that appear as `/slash-commands` in Claude Code.
+- **MCP Tools, Resources, and Prompts** exposed as the spec defines them: Tools for actions and asynchronous jobs, Resources for read-only project data with `subscribe` for live status updates, and 20 Prompts for parameterized AI templates that appear as `/slash-commands` in Claude Code. See [`docs/prompts.md`](docs/prompts.md) for the full prompt reference.
 - **Asynchronous job pattern.** Long-running media operations return a job identifier immediately; status streams back over the MCP transport, so progress shows in Claude Code without polling.
 - **Auto-login handoff.** Workflow completion returns a short-lived signed URL that opens the editor with your account already signed in.
 
