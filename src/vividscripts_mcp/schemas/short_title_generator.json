@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "short_title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "short_title"
+  ]
+}

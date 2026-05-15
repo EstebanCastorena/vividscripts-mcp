@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "genre": {
+      "type": "string"
+    },
+    "sub_genre": {
+      "type": "string"
+    },
+    "tone": {
+      "type": "string"
+    },
+    "narrative_structure": {
+      "type": "string"
+    },
+    "act_boundaries": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "climax_paragraph": {
+      "type": "integer"
+    },
+    "color_palette_guidance": {
+      "type": "string"
+    },
+    "lighting_arc": {
+      "type": "string"
+    },
+    "pacing_signature": {
+      "type": "string"
+    },
+    "creative_direction": {
+      "type": "string"
+    },
+    "shot_plan": {
+      "type": "string"
+    },
+    "motion_plan": {
+      "type": "string"
+    },
+    "transition_plan": {
+      "type": "string"
+    },
+    "paragraph_analyses": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "paragraph_index": {
+            "type": "integer"
+          },
+          "tension": {
+            "type": "integer"
+          },
+          "scene_type": {
+            "type": "string"
+          },
+          "grouping_hint": {
+            "type": "string"
+          },
+          "grouping_rationale": {
+            "type": "string"
+          },
+          "visual_intensity": {
+            "type": "string"
+          },
+          "viewer_emotion": {
+            "type": "string"
+          },
+          "shot_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "paragraph_index",
+          "tension"
+        ]
+      }
+    },
+    "character_archetypes": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "archetype": {
+            "type": "string"
+          },
+          "narrator_visibility": {
+            "type": "string"
+          },
+          "visual_note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    }
+  },
+  "required": [
+    "genre",
+    "tone",
+    "narrative_structure",
+    "creative_direction",
+    "paragraph_analyses"
+  ]
+}

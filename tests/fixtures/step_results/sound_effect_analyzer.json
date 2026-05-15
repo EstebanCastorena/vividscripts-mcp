@@ -1,0 +1,10 @@
+{
+  "effects": [
+    {
+      "name": "floor_creak",
+      "time": 3.2,
+      "volume_level": "MEDIUM"
+    }
+  ],
+  "suggested_effects": []
+}

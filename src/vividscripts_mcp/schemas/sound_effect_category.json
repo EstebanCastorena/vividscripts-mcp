@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "selected_categories": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "category"
+        ]
+      }
+    }
+  },
+  "required": [
+    "selected_categories"
+  ]
+}
