@@ -280,11 +280,16 @@ class MockBackend:
     ) -> StepResultOutcome:
         with self._lock:
             state = self._require(user_id, project_id)
-            valid_names = {s.name for s in WORKFLOW_STEPS}
-            if step_name not in valid_names:
+            # KAN-59: the save_step_result *tool* validates step_name +
+            # result against the canonical JSON schema (prompt namespace)
+            # before reaching the backend, so the mock no longer
+            # second-guesses the name against WORKFLOW_STEPS (a coarser,
+            # different namespace — see KAN-59 notes / Phase 2 progress
+            # log). It only guards against an empty name.
+            if not step_name.strip():
                 return StepResultOutcome(
                     success=False,
-                    validation_errors=[f"unknown step: {step_name}"],
+                    validation_errors=["step_name must be non-empty"],
                 )
             if step_name not in state.completed_steps:
                 state.completed_steps.append(step_name)

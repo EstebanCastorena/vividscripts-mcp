@@ -90,14 +90,22 @@ def test_workflow_advances(
     assert after_first.current_step == "story_blueprint"
 
 
-def test_save_step_result_rejects_unknown_steps(
+def test_save_step_result_rejects_empty_step_name(
     backend: MockBackend, user_id: str, settings: ProjectSettings, sample_story: str
 ) -> None:
+    """KAN-59 moved step-name validation to the save_step_result *tool*
+    (schema-backed, prompt namespace). The mock no longer second-guesses
+    the name against WORKFLOW_STEPS — it only rejects an empty name.
+
+    (Was test_save_step_result_rejects_unknown_steps; an arbitrary
+    unknown name is now accepted by the mock because the tool's
+    validate_step_result is the authoritative gate.)
+    """
     info = backend.create_project(user_id, sample_story, settings)
-    outcome = backend.save_step_result(user_id, info.project_id, "not_a_real_step", {})
+    outcome = backend.save_step_result(user_id, info.project_id, "   ", {})
     assert not outcome.success
     assert outcome.validation_errors is not None
-    assert any("not_a_real_step" in e for e in outcome.validation_errors)
+    assert any("non-empty" in e for e in outcome.validation_errors)
 
 
 def test_save_step_result_is_idempotent(
