@@ -22,7 +22,7 @@ from importlib import resources
 
 import jsonschema
 
-__all__ = ["KNOWN_STEPS", "validate_step_result"]
+__all__ = ["KNOWN_STEPS", "get_output_schema", "validate_step_result"]
 
 
 @cache
@@ -47,6 +47,16 @@ def _known_steps() -> frozenset[str]:
 #: PROMPT_INTERFACES names (enforced by a cross-test in
 #: tests/unit/test_schemas.py).
 KNOWN_STEPS: frozenset[str] = _known_steps()
+
+
+def get_output_schema(step_name: str) -> dict[str, object] | None:
+    """Return the JSON Schema for a step's output, or ``None`` if unknown.
+
+    Public accessor used by KAN-58's ``prompts/get`` to embed the
+    expected output shape in the rendered prompt so Claude Code knows
+    what to produce and what ``save_step_result`` will validate.
+    """
+    return _load_schema(step_name)
 
 
 def validate_step_result(
