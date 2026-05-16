@@ -59,7 +59,17 @@ class BackendProtocol(Protocol):
         project_id: str,
         step_name: str,
         result: dict[str, Any],
-    ) -> StepResultOutcome: ...
+        scene_index: int | None = None,
+    ) -> StepResultOutcome:
+        """Persist an AI step result.
+
+        ``scene_index`` (KAN-90): ``None`` → the step is single-valued
+        (``current_data[step] = result``, unchanged). ``>= 0`` → a
+        per-scene/looped step; results accumulate under
+        ``current_data[step]`` keyed by scene index. A step must be used
+        consistently one way (mixed-mode is rejected).
+        """
+        ...
 
     def list_workflow_steps(self) -> list[StepDefinition]: ...
 

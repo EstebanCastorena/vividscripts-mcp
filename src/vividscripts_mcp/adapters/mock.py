@@ -27,6 +27,7 @@ from vividscripts_mcp.models import (
     StepResultOutcome,
     WorkflowState,
 )
+from vividscripts_mcp.stepstore import store_step_result
 
 # Mirrors the 16-step pipeline from VividScripts. The MockBackend uses this to
 # advance workflow state; the real backend will return its own definitive list.
@@ -275,23 +276,23 @@ class MockBackend:
         project_id: str,
         step_name: str,
         result: dict[str, Any],
+        scene_index: int | None = None,
     ) -> StepResultOutcome:
         with self._lock:
             state = self._require(user_id, project_id)
             # KAN-59: the save_step_result *tool* validates step_name +
-            # result against the canonical JSON schema (prompt namespace)
-            # before reaching the backend, so the mock no longer
-            # second-guesses the name against WORKFLOW_STEPS (a coarser,
-            # different namespace — see KAN-59 notes / Phase 2 progress
-            # log). It only guards against an empty name.
+            # result against the canonical JSON schema before reaching
+            # the backend, so the mock only guards against an empty name.
             if not step_name.strip():
                 return StepResultOutcome(
                     success=False,
                     validation_errors=["step_name must be non-empty"],
                 )
+            err = store_step_result(state.current_data, step_name, result, scene_index)
+            if err is not None:
+                return StepResultOutcome(success=False, validation_errors=[err])
             if step_name not in state.completed_steps:
                 state.completed_steps.append(step_name)
-            state.current_data[step_name] = result
             return StepResultOutcome(success=True, next_step=self._next_step(state))
 
     def list_workflow_steps(self) -> list[StepDefinition]:
