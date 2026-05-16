@@ -2,9 +2,16 @@
 
 Implements ``POST /oauth/register`` with these guarantees:
 
-- Session-gated: rejects unauthenticated requests with 401 (mitigates
-  KAN-46 / threat 1.4 — DCR replay attack). The user must already hold
-  a session in the configured ``SessionStore``.
+- Session-gated **in offline mode only**: rejects unauthenticated
+  requests with 401 (mitigates KAN-46 / threat 1.4 — DCR replay
+  attack). In the Cognito **broker** (KAN-85) registration is open per
+  RFC 7591: the real authentication gate is Cognito Hosted UI at the
+  authorize step, so a client that registers but never completes the
+  Cognito login obtains no tokens. Gating DCR on a local session there
+  would also be impossible — the broker has no local IdP to mint one,
+  and it breaks the standard MCP DCR-then-authorize flow Claude Code
+  performs. Residual DCR-spam risk is covered by the deferred
+  rate-limiting follow-up (KAN-38).
 - Redirect-URI safety: per RFC 8252 § 7, accepts only HTTPS or
   loopback-IP/localhost addresses. Public web URLs over plaintext HTTP
   are rejected to prevent token-leak attacks.
@@ -115,30 +122,48 @@ def _validate_metadata(req: RegistrationRequest) -> JSONResponse | None:
     return None
 
 
+#: ``owner_user_id`` for clients registered through the open broker
+#: path: there is no local session/user at registration time (the user
+#: identity is established later at Cognito login and bound into the
+#: auth code at ``/oauth/callback``).
+BROKER_CLIENT_OWNER = "cognito-delegated"
+
+
 def make_register_handler(
     client_store: ClientStore,
     session_store: SessionStore,
+    *,
+    session_gated: bool = True,
 ) -> Callable[[Request], Awaitable[JSONResponse]]:
     """Build the ``POST /oauth/register`` handler bound to specific stores.
+
+    ``session_gated`` (default ``True``) keeps the offline-mode behavior:
+    a prior ``SessionStore`` session is required. ``server.build_app``
+    passes ``session_gated=False`` in the Cognito broker, where DCR is
+    open per RFC 7591 (Cognito Hosted UI is the real auth gate).
 
     Returning a closure (rather than module-level state) means the same
     server can be stood up in tests with isolated stores per case.
     """
 
     async def register(request: Request) -> JSONResponse:
-        session = require_session(request, session_store)
-        if session is None:
-            return JSONResponse(
-                {
-                    "error": "unauthorized",
-                    "error_description": (
-                        "Dynamic client registration requires an authenticated "
-                        "session. Log in to VividScripts first."
-                    ),
-                },
-                status_code=401,
-                headers={"WWW-Authenticate": 'Session realm="vividscripts-mcp"'},
-            )
+        if session_gated:
+            session = require_session(request, session_store)
+            if session is None:
+                return JSONResponse(
+                    {
+                        "error": "unauthorized",
+                        "error_description": (
+                            "Dynamic client registration requires an authenticated "
+                            "session. Log in to VividScripts first."
+                        ),
+                    },
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Session realm="vividscripts-mcp"'},
+                )
+            owner_user_id = session.user_id
+        else:
+            owner_user_id = BROKER_CLIENT_OWNER
 
         try:
             payload: Any = await request.json()
@@ -167,7 +192,7 @@ def make_register_handler(
         client = RegisteredClient(
             client_id=client_id,
             issued_at=issued_at,
-            owner_user_id=session.user_id,
+            owner_user_id=owner_user_id,
             redirect_uris=tuple(req.redirect_uris),
             token_endpoint_auth_method=req.token_endpoint_auth_method,
             grant_types=tuple(req.grant_types),
@@ -179,7 +204,7 @@ def make_register_handler(
         emit_audit_event(
             "oauth.client.registered",
             client_id=client_id,
-            owner_user_id=session.user_id,
+            owner_user_id=owner_user_id,
             redirect_uris=req.redirect_uris,
             client_name=req.client_name,
         )
