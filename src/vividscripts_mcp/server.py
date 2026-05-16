@@ -53,6 +53,7 @@ from vividscripts_mcp.oauth.metadata import (
 )
 from vividscripts_mcp.oauth.mock_idp import LOGIN_PATH as MOCK_IDP_LOGIN_PATH
 from vividscripts_mcp.oauth.mock_idp import make_login_handler
+from vividscripts_mcp.oauth.ratelimit import GlobalRateLimiter
 from vividscripts_mcp.oauth.session import MockSessionStore, SessionStore
 from vividscripts_mcp.oauth.store import ClientStore, MockClientStore
 from vividscripts_mcp.oauth.token import make_token_handler
@@ -145,6 +146,7 @@ def build_app(
     refresh_token_store: RefreshTokenStore | None = None,
     jwks_provider: JWKSProvider | None = None,
     cognito: CognitoConfig | None = None,
+    dcr_rate_limiter: GlobalRateLimiter | None = None,
 ) -> Starlette:
     """Assemble the ASGI app: Starlette host + mounted FastMCP streamable HTTP.
 
@@ -225,6 +227,11 @@ def build_app(
                 # is the real auth gate (KAN-85). Offline keeps the
                 # session gate (KAN-46).
                 session_gated=cognito is None,
+                # Global (not per-IP) flood ceiling — KAN-83. Sound
+                # per-IP limiting is the edge WAF's job.
+                rate_limiter=(
+                    dcr_rate_limiter if dcr_rate_limiter is not None else GlobalRateLimiter()
+                ),
             ),
             methods=["POST"],
         ),
