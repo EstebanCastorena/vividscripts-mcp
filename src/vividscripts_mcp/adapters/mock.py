@@ -13,10 +13,11 @@ from __future__ import annotations
 import threading
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from vividscripts_mcp.models import (
     JobStatus,
+    MusicSelection,
     ProjectDetail,
     ProjectInfo,
     ProjectSettings,
@@ -345,6 +346,27 @@ class MockBackend:
             msg = f"job {job_id!r} not found"
             raise KeyError(msg)
         return job
+
+    #: Stand-in for the shared music catalog (the real adapter reads
+    #: assets/music/music-catalog.json). Only "dark-tension" ships with
+    #: tracks; any other mood reports needs_generation=True.
+    _MUSIC_CATALOG: ClassVar[dict[str, list[str]]] = {
+        "dark-tension": ["horror-394969.mp3", "scary-ambience-347437.mp3"],
+    }
+
+    def select_music(self, user_id: str, project_id: str, mood: str) -> MusicSelection:
+        with self._lock:
+            state = self._require(user_id, project_id)
+            if not mood:
+                msg = "mood must be a non-empty string"
+                raise ValueError(msg)
+            state.settings = state.settings.model_copy(update={"music_mood": mood})
+            tracks = self._MUSIC_CATALOG.get(mood, [])
+            return MusicSelection(
+                mood=mood,
+                available_tracks=list(tracks),
+                needs_generation=not tracks,
+            )
 
     # ----- scenes -----------------------------------------------------------
 

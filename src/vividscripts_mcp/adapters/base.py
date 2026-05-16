@@ -12,6 +12,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from vividscripts_mcp.models import (
     JobStatus,
+    MusicSelection,
     ProjectDetail,
     ProjectInfo,
     ProjectSettings,
@@ -96,6 +97,16 @@ class BackendProtocol(Protocol):
         ...
 
     def check_job(self, user_id: str, job_id: str) -> JobStatus: ...
+
+    def select_music(self, user_id: str, project_id: str, mood: str) -> MusicSelection:
+        """Choose a background-music mood for the project (synchronous).
+
+        Not a job: records ``mood`` on the project and reports what the
+        shared catalog already has. ``needs_generation`` is true when no
+        tracks exist for the mood yet — the caller then runs the
+        ``generate_music`` job.
+        """
+        ...
 
     # --- Scenes -------------------------------------------------------------
 

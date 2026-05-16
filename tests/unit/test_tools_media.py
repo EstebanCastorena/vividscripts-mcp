@@ -7,7 +7,7 @@ from collections.abc import Iterator
 import pytest
 
 from vividscripts_mcp.adapters.mock import MockBackend
-from vividscripts_mcp.models import JobStatus, ProjectSettings
+from vividscripts_mcp.models import JobStatus, MusicSelection, ProjectSettings
 from vividscripts_mcp.oauth.bearer import UserClaims
 from vividscripts_mcp.oauth.context import AuthRequired, set_user_claims
 from vividscripts_mcp.tools.media import (
@@ -16,8 +16,10 @@ from vividscripts_mcp.tools.media import (
     make_check_job_tool,
     make_generate_audio_tool,
     make_generate_images_tool,
+    make_generate_music_tool,
     make_generate_sfx_tool,
     make_generate_thumbnail_tool,
+    make_select_music_tool,
 )
 
 _GENERATE_FACTORIES = [
@@ -26,6 +28,7 @@ _GENERATE_FACTORIES = [
     (make_generate_sfx_tool, "generate_sfx"),
     (make_generate_thumbnail_tool, "generate_thumbnail"),
     (make_animate_scene_tool, "animate_scene"),
+    (make_generate_music_tool, "generate_music"),
 ]
 
 
@@ -115,3 +118,29 @@ def test_all_generate_tools_require_auth(
 ) -> None:
     with pytest.raises(AuthRequired):
         factory(backend)(project_id)
+
+
+def test_select_music_is_synchronous_and_records_mood(
+    backend: MockBackend, project_id: str, _auth: None
+) -> None:
+    sel = make_select_music_tool(backend)(project_id, "dark-tension")
+    assert isinstance(sel, MusicSelection)
+    assert sel.mood == "dark-tension"
+    assert sel.available_tracks  # the mock catalog has dark-tension tracks
+    assert sel.needs_generation is False
+    # Mood is now recorded on the project.
+    detail = backend.get_project("user-alpha", project_id)
+    assert detail.metadata["settings"]["music_mood"] == "dark-tension"
+
+
+def test_select_music_unknown_mood_needs_generation(
+    backend: MockBackend, project_id: str, _auth: None
+) -> None:
+    sel = make_select_music_tool(backend)(project_id, "whimsical-jazz")
+    assert sel.available_tracks == []
+    assert sel.needs_generation is True
+
+
+def test_select_music_requires_auth(backend: MockBackend, project_id: str) -> None:
+    with pytest.raises(AuthRequired):
+        make_select_music_tool(backend)(project_id, "dark-tension")

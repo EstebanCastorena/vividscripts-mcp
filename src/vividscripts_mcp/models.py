@@ -156,3 +156,19 @@ class MagicLinkUrl(BaseModel):
 
     url: str
     expires_at: datetime
+
+
+class MusicSelection(BaseModel):
+    """Returned by select_music (a synchronous catalog lookup).
+
+    ``select_music`` does not generate anything — it records the chosen
+    mood for the project and reports what the shared music catalog
+    already has. If ``needs_generation`` is true the caller should run
+    the ``generate_music`` job to synthesize tracks for the mood.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mood: str
+    available_tracks: list[str]
+    needs_generation: bool
