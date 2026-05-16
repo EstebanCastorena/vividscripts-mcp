@@ -192,13 +192,25 @@ def _metadata_url(scope: Scope) -> str:
     Using the request's own host means a real client behind any deployment
     URL (or a TestClient pointing at ``http://testserver``) gets back a
     self-consistent ``resource_metadata`` URL it can actually fetch.
+
+    Behind a TLS-terminating proxy (the production deployment runs behind
+    CloudFront → ALB) the ASGI ``scheme`` is ``http`` even though the
+    client spoke ``https``. Honor the proxy's ``X-Forwarded-Proto`` so
+    the advertised metadata URL stays ``https`` — a strict OAuth client
+    may reject a non-https resource-metadata pointer.
     """
     headers = Headers(scope=scope)
     host = headers.get("host")
     if host is None:
         server = scope.get("server") or ("localhost", 80)
         host = f"{server[0]}:{server[1]}"
-    scheme = scope.get("scheme", "http")
+    forwarded_proto = headers.get("x-forwarded-proto")
+    if forwarded_proto:
+        # May be a comma-separated list ("https, http"); the first hop
+        # (the original client-facing scheme) is authoritative.
+        scheme = forwarded_proto.split(",")[0].strip()
+    else:
+        scheme = scope.get("scheme", "http")
     return f"{scheme}://{host}{PRM_PATH}"
 
 

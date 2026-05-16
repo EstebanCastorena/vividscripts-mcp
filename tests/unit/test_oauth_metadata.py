@@ -59,6 +59,22 @@ def test_unauthed_mcp_returns_401_with_www_authenticate() -> None:
     assert "testserver" in challenge
 
 
+def test_www_authenticate_honors_x_forwarded_proto() -> None:
+    """Behind a TLS-terminating proxy the metadata URL must stay https.
+
+    TestClient speaks http; an ``X-Forwarded-Proto: https`` header (set by
+    CloudFront/ALB in production) must make the advertised
+    resource_metadata URL https, not http.
+    """
+    with TestClient(build_app()) as client:
+        response = client.get("/mcp", headers={"X-Forwarded-Proto": "https"})
+
+    assert response.status_code == 401
+    challenge = response.headers["WWW-Authenticate"]
+    assert 'resource_metadata="https://' in challenge
+    assert "http://testserver" not in challenge
+
+
 def test_bearer_present_mcp_does_not_401_from_middleware() -> None:
     """A request carrying a valid Bearer JWT passes the auth middleware.
 
