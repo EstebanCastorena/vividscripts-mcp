@@ -36,8 +36,10 @@ from starlette.datastructures import FormData
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from vividscripts_mcp.oauth import cognito as cognito_mod
 from vividscripts_mcp.oauth.audit import emit_audit_event
-from vividscripts_mcp.oauth.codes import AuthCodeStore
+from vividscripts_mcp.oauth.codes import AuthCode, AuthCodeStore
+from vividscripts_mcp.oauth.cognito import CognitoConfig
 from vividscripts_mcp.oauth.store import ClientStore
 from vividscripts_mcp.oauth.tokens import (
     RefreshTokenStore,
@@ -69,8 +71,16 @@ def make_token_handler(
     client_store: ClientStore,
     code_store: AuthCodeStore,
     refresh_token_store: RefreshTokenStore,
+    cognito: CognitoConfig | None = None,
 ) -> Callable[[Request], Awaitable[JSONResponse]]:
-    """Build the ``POST /oauth/token`` handler bound to specific stores."""
+    """Build the ``POST /oauth/token`` handler bound to specific stores.
+
+    With ``cognito`` set the endpoint is **pass-through** (KAN-36): the
+    PKCE / single-use / binding checks are unchanged, but the response
+    returns the Cognito tokens captured at ``/oauth/callback`` instead
+    of self-minting, and the refresh grant proxies to Cognito. With
+    ``cognito`` unset it keeps the Phase-1 self-mint behavior (offline).
+    """
 
     async def token(request: Request) -> JSONResponse:
         form = await request.form()
@@ -78,10 +88,10 @@ def make_token_handler(
 
         if grant_type == "authorization_code":
             return await _handle_authorization_code(
-                form, client_store, code_store, refresh_token_store
+                form, client_store, code_store, refresh_token_store, cognito
             )
         if grant_type == "refresh_token":
-            return await _handle_refresh_token(form, refresh_token_store)
+            return await _handle_refresh_token(form, refresh_token_store, cognito)
 
         return _error(
             "unsupported_grant_type",
@@ -91,11 +101,26 @@ def make_token_handler(
     return token
 
 
+def _passthrough_body(auth_code: AuthCode) -> JSONResponse:
+    """Return the Cognito tokens bound to this one-shot code (KAN-36)."""
+    body: dict[str, Any] = {
+        "access_token": auth_code.cognito_access_token,
+        "token_type": "Bearer",
+        "expires_in": auth_code.cognito_expires_in,
+    }
+    if auth_code.cognito_refresh_token is not None:
+        body["refresh_token"] = auth_code.cognito_refresh_token
+    if auth_code.scope is not None:
+        body["scope"] = auth_code.scope
+    return JSONResponse(body, status_code=200)
+
+
 async def _handle_authorization_code(
     form: FormData,
     client_store: ClientStore,
     code_store: AuthCodeStore,
     refresh_token_store: RefreshTokenStore,
+    cognito: CognitoConfig | None,
 ) -> JSONResponse:
     code = str(form.get("code", ""))
     client_id = str(form.get("client_id", ""))
@@ -135,6 +160,24 @@ async def _handle_authorization_code(
             "PKCE code_verifier does not match the original code_challenge",
         )
 
+    # Broker pass-through (KAN-36): the one-shot code carries the Cognito
+    # tokens bound at /oauth/callback. PKCE/binding/single-use were all
+    # enforced above; return Cognito's tokens, never self-mint.
+    if cognito is not None:
+        if auth_code.cognito_access_token is None:
+            return _error(
+                "invalid_grant",
+                "authorization code is not bound to Cognito tokens",
+            )
+        emit_audit_event(
+            "oauth.token.issued",
+            grant_type="authorization_code",
+            client_id=client_id,
+            user_id=auth_code.user_id,
+            via="cognito",
+        )
+        return _passthrough_body(auth_code)
+
     access_token, expires_in = mint_access_token(
         user_id=auth_code.user_id,
         client_id=client_id,
@@ -168,10 +211,35 @@ async def _handle_authorization_code(
 async def _handle_refresh_token(
     form: FormData,
     refresh_token_store: RefreshTokenStore,
+    cognito: CognitoConfig | None,
 ) -> JSONResponse:
     presented = str(form.get("refresh_token", ""))
     if not presented:
         return _error("invalid_request", "refresh_token is required")
+
+    # Broker pass-through (KAN-36): proxy the refresh to Cognito and
+    # return Cognito's rotated access token. Cognito does not rotate the
+    # refresh token itself, so the client keeps reusing the original.
+    if cognito is not None:
+        tokens = await cognito_mod.refresh_tokens(cognito, refresh_token=presented)
+        if tokens is None:
+            return _error(
+                "invalid_grant",
+                "refresh_token is invalid, expired, or revoked",
+            )
+        emit_audit_event(
+            "oauth.token.issued",
+            grant_type="refresh_token",
+            client_id=cognito.client_id,
+            via="cognito",
+        )
+        refreshed: dict[str, Any] = {
+            "access_token": tokens.access_token,
+            "token_type": "Bearer",
+            "expires_in": tokens.expires_in,
+            "refresh_token": tokens.refresh_token or presented,
+        }
+        return JSONResponse(refreshed, status_code=200)
 
     record = refresh_token_store.consume(presented)
     if record is None:

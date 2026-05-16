@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Production OAuth via Amazon Cognito. `build_app(cognito=...)` runs the
+  server as a Dynamic Client Registration facade that delegates the
+  browser login to Cognito Hosted UI and passes Cognito's own access and
+  refresh tokens through unchanged — the server no longer issues its own
+  tokens in this mode. Adds the `/oauth/callback` redirect endpoint and
+  an RFC 8414 authorization-server metadata document for client
+  discovery; Bearer validation checks tokens against Cognito's JWKS.
+- An offline mode (no Cognito configured) is preserved for local
+  development and the test suite: the in-memory mock identity provider
+  and self-issued tokens are used only when no Cognito config is given,
+  and are never mounted in a Cognito-backed deployment.
+
 ## [0.1.0a0] — 2026-05-13
 
 ### Added

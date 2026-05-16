@@ -9,6 +9,12 @@ Phase 1 (KAN-29) implements:
 - ``bearer`` — RFC 6750 Bearer token validator (KAN-52)
 
 Supporting modules (``store``, ``session``, ``audit``) provide the
-in-memory infrastructure Phase 1 ships against. Phase 3 (KAN-31) swaps
-the mocks for production-grade backings (AWS Secrets Manager, Cognito).
+in-memory infrastructure the offline mode ships against.
+
+The production broker (KAN-85, decided by KAN-36 Cognito-direct
+pass-through) adds ``cognito`` + ``callback``: ``/oauth/authorize``
+delegates to Cognito Hosted UI, ``/oauth/callback`` exchanges Cognito's
+code, and ``/oauth/token`` passes Cognito's tokens through unchanged
+(the package stays the RFC 7591 DCR facade Cognito user pools can't
+provide). ``server.build_app(cognito=...)`` selects broker vs offline.
 """

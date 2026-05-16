@@ -27,6 +27,7 @@ Cognito Hosted UI handles the user-visible failure path.
 from __future__ import annotations
 
 import secrets
+import urllib.parse
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -38,11 +39,12 @@ from vividscripts_mcp.oauth.codes import (
     AuthRequestState,
     AuthRequestStateStore,
 )
+from vividscripts_mcp.oauth.cognito import CognitoConfig
 from vividscripts_mcp.oauth.store import ClientStore
 
-#: Where ``/oauth/authorize`` sends the user agent after a valid request.
-#: Phase 3 swaps this for Cognito Hosted UI; the request_id query
-#: parameter survives the swap.
+#: Where ``/oauth/authorize`` sends the user agent in **offline** mode
+#: (no Cognito configured). The broker path redirects to Cognito Hosted
+#: UI instead; the ``request_id`` survives both as the round-trip nonce.
 MOCK_IDP_LOGIN_PATH = "/_mock_idp/login"
 
 
@@ -56,8 +58,17 @@ def _error(error: str, description: str, status_code: int = 400) -> JSONResponse
 def make_authorize_handler(
     client_store: ClientStore,
     request_state_store: AuthRequestStateStore,
+    cognito: CognitoConfig | None = None,
 ) -> Callable[[Request], Awaitable[Response]]:
-    """Build the ``GET /oauth/authorize`` handler bound to specific stores."""
+    """Build the ``GET /oauth/authorize`` handler bound to specific stores.
+
+    When ``cognito`` is set the handler delegates authentication to
+    Cognito Hosted UI (the broker path, KAN-85): it stores the pending
+    request and 302s the browser to Cognito's authorize endpoint with
+    the package's ``/oauth/callback`` as Cognito's ``redirect_uri`` and
+    the ``request_id`` as the round-trip ``state``. With ``cognito``
+    unset it keeps the Phase-1 mock-IdP redirect for offline use.
+    """
 
     async def authorize(request: Request) -> Response:
         params = request.query_params
@@ -117,6 +128,21 @@ def make_authorize_handler(
                 expires_at=now + AUTH_REQUEST_TTL_SECONDS,
             )
         )
+
+        if cognito is not None:
+            cognito_query = urllib.parse.urlencode(
+                {
+                    "response_type": "code",
+                    "client_id": cognito.client_id,
+                    "redirect_uri": cognito.callback_url,
+                    "scope": " ".join(cognito.scopes),
+                    "state": request_id,
+                }
+            )
+            return RedirectResponse(
+                f"{cognito.authorize_endpoint}?{cognito_query}",
+                status_code=302,
+            )
 
         return RedirectResponse(
             f"{MOCK_IDP_LOGIN_PATH}?request_id={request_id}",
