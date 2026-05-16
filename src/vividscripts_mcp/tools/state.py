@@ -54,21 +54,33 @@ class OverrideAck(BaseModel):
 
 def make_save_step_result_tool(
     backend: BackendProtocol,
-) -> Callable[[str, str, dict[str, object]], StepResultOutcome]:
+) -> Callable[[str, str, dict[str, object], int | None], StepResultOutcome]:
     """Build ``save_step_result`` bound to ``backend``."""
 
     def save_step_result(
         project_id: str,
         step_name: str,
         result: dict[str, object],
+        scene_index: int | None = None,
     ) -> StepResultOutcome:
         """Validate an AI step result against its schema, then persist it.
 
         Returns ``success=False`` with ``validation_errors`` (and saves
         nothing) when the result doesn't match the step's JSON Schema.
         On success returns the backend outcome including ``next_step``.
+
+        ``scene_index`` (KAN-90): omit for single-valued steps. For a
+        per-scene/looped step (e.g. per-scene image directions), pass
+        the 0-based scene index — results accumulate per scene rather
+        than overwriting. A step must be used one way consistently.
         """
         user_id = require_user_claims().sub
+        if scene_index is not None and scene_index < 0:
+            return StepResultOutcome(
+                success=False,
+                validation_errors=["scene_index must be >= 0"],
+                next_step=None,
+            )
         ok, errors = validate_step_result(step_name, result)
         if not ok:
             return StepResultOutcome(
@@ -81,6 +93,7 @@ def make_save_step_result_tool(
             project_id=project_id,
             step_name=step_name,
             result=result,
+            scene_index=scene_index,
         )
 
     return save_step_result
