@@ -15,7 +15,10 @@ tools land starting with KAN-53 (project tools) and KAN-30 (Phase 2 prompts).
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
@@ -65,14 +68,52 @@ from vividscripts_mcp.tools.state import register_state_tools
 SERVER_NAME = "vividscripts-mcp"
 
 
-def create_mcp_server(backend: BackendProtocol) -> FastMCP:
+def _broker_transport_security(cognito: CognitoConfig) -> TransportSecuritySettings:
+    """DNS-rebinding allow-list for the real deployment host.
+
+    FastMCP auto-enables DNS-rebinding protection with a localhost-only
+    allow-list (its default ``host`` is 127.0.0.1), so in production a
+    request with ``Host: vividscripts.ai`` is rejected with HTTP 421
+    ("Invalid Host header"). Behind CloudFront → ALB the container sees
+    the bare public host (no port), and the SDK's ``:*`` wildcard only
+    matches host:port — so the exact bare host must be allow-listed.
+    Localhost patterns are kept for the in-cluster / loopback paths.
+    """
+    host = urlparse(cognito.public_base_url).hostname or ""
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[host, f"{host}:*", "127.0.0.1:*", "localhost:*", "[::1]:*"],
+        allowed_origins=[
+            cognito.public_base_url,
+            "http://127.0.0.1:*",
+            "http://localhost:*",
+            "http://[::1]:*",
+        ],
+    )
+
+
+def create_mcp_server(
+    backend: BackendProtocol,
+    cognito: CognitoConfig | None = None,
+) -> FastMCP:
     """Construct a FastMCP server with the Phase 1 tool surface.
 
     ``backend`` is injected so the project-management tools (KAN-53) can
     dispatch user-scoped storage operations. The workflow-step stub
     doesn't use it yet — that wiring lands in KAN-30 (Phase 2).
+
+    In broker mode (``cognito`` set) the FastMCP transport's
+    DNS-rebinding allow-list is configured for the real deployment host;
+    offline keeps FastMCP's localhost auto-protection (tests/dev run on
+    127.0.0.1).
     """
-    mcp = FastMCP(SERVER_NAME)
+    if cognito is not None:
+        mcp = FastMCP(
+            SERVER_NAME,
+            transport_security=_broker_transport_security(cognito),
+        )
+    else:
+        mcp = FastMCP(SERVER_NAME)
 
     # KAN-53 project tools — user-scoped, Bearer-authenticated.
     mcp.tool()(make_create_project_tool(backend))
@@ -242,7 +283,7 @@ def build_app(
             )
         )
 
-    mcp = create_mcp_server(resolved_backend)
+    mcp = create_mcp_server(resolved_backend, cognito)
     inner = mcp.streamable_http_app()
     routes.append(Mount("/", app=inner))
     return Starlette(

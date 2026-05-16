@@ -411,6 +411,23 @@ def test_mock_idp_not_mounted_in_broker_mode(http: TestClient) -> None:
     assert "Mock IdP" not in response.text
 
 
+def test_broker_allowlists_production_host(cognito: CognitoConfig) -> None:
+    """FastMCP's DNS-rebinding guard must allow the real deployment host
+    (else production requests get HTTP 421); offline keeps localhost-only."""
+    from vividscripts_mcp.adapters.mock import MockBackend
+    from vividscripts_mcp.server import create_mcp_server
+
+    broker = create_mcp_server(MockBackend(), cognito)
+    ts = broker.settings.transport_security
+    assert ts is not None
+    assert ts.enable_dns_rebinding_protection is True
+    assert "vividscripts.ai" in ts.allowed_hosts
+
+    offline = create_mcp_server(MockBackend())
+    ts_off = offline.settings.transport_security
+    assert ts_off is None or "vividscripts.ai" not in ts_off.allowed_hosts
+
+
 def test_broker_dcr_is_open_no_session_required(
     http: TestClient, client_store: MockClientStore
 ) -> None:
