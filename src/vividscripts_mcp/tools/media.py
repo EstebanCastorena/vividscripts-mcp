@@ -21,7 +21,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict
 
 from vividscripts_mcp.adapters.base import BackendProtocol
-from vividscripts_mcp.models import JobStatus
+from vividscripts_mcp.models import JobStatus, MusicSelection
 from vividscripts_mcp.oauth.context import require_user_claims
 
 
@@ -164,6 +164,50 @@ def make_animate_scene_tool(
     return animate_scene
 
 
+def make_generate_music_tool(
+    backend: BackendProtocol,
+) -> Callable[[str], JobSubmission]:
+    """Build the ``generate_music`` tool bound to ``backend`` (KAN-71)."""
+
+    def generate_music(project_id: str) -> JobSubmission:
+        """Start background-music synthesis for the project's mood.
+
+        Async — returns a ``job_id`` immediately; poll ``check_job``.
+        Requires a mood: call ``select_music`` first.
+
+        Present as one line:
+        ``Music job started: <job_id> — poll check_job for progress.``
+        """
+        user_id = require_user_claims().sub
+        job_id = backend.submit_job(
+            user_id=user_id,
+            project_id=project_id,
+            job_type="generate_music",
+            params={},
+        )
+        return JobSubmission(job_id=job_id, job_type="generate_music")
+
+    return generate_music
+
+
+def make_select_music_tool(
+    backend: BackendProtocol,
+) -> Callable[[str, str], MusicSelection]:
+    """Build the ``select_music`` tool bound to ``backend`` (KAN-71)."""
+
+    def select_music(project_id: str, mood: str) -> MusicSelection:
+        """Choose a background-music mood for the project (synchronous).
+
+        Not a job — returns immediately. Records ``mood`` and reports
+        the catalog tracks already available. If ``needs_generation``
+        is true, run ``generate_music`` to synthesize tracks for it.
+        """
+        user_id = require_user_claims().sub
+        return backend.select_music(user_id=user_id, project_id=project_id, mood=mood)
+
+    return select_music
+
+
 def make_check_job_tool(
     backend: BackendProtocol,
 ) -> Callable[[str], JobStatus]:
@@ -190,4 +234,6 @@ def register_media_tools(mcp: FastMCP, backend: BackendProtocol) -> None:
     mcp.tool()(make_generate_sfx_tool(backend))
     mcp.tool()(make_generate_thumbnail_tool(backend))
     mcp.tool()(make_animate_scene_tool(backend))
+    mcp.tool()(make_generate_music_tool(backend))
+    mcp.tool()(make_select_music_tool(backend))
     mcp.tool()(make_check_job_tool(backend))
