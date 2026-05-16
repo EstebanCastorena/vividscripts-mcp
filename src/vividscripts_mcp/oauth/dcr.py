@@ -38,6 +38,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from vividscripts_mcp.oauth.audit import emit_audit_event
+from vividscripts_mcp.oauth.ratelimit import GlobalRateLimiter
 from vividscripts_mcp.oauth.session import SessionStore, require_session
 from vividscripts_mcp.oauth.store import ClientStore, RegisteredClient
 
@@ -134,6 +135,7 @@ def make_register_handler(
     session_store: SessionStore,
     *,
     session_gated: bool = True,
+    rate_limiter: GlobalRateLimiter | None = None,
 ) -> Callable[[Request], Awaitable[JSONResponse]]:
     """Build the ``POST /oauth/register`` handler bound to specific stores.
 
@@ -147,6 +149,26 @@ def make_register_handler(
     """
 
     async def register(request: Request) -> JSONResponse:
+        # Global rolling-window ceiling FIRST — reject a flood before any
+        # body parse / store work. Deliberately not per-IP (the edge WAF
+        # does sound per-IP limiting; the client IP isn't trustworthy
+        # here). KAN-83.
+        if rate_limiter is not None:
+            retry_after = rate_limiter.check()
+            if retry_after is not None:
+                emit_audit_event(
+                    "oauth.client.registration.rate_limited",
+                    retry_after=retry_after,
+                )
+                return JSONResponse(
+                    {
+                        "error": "rate_limit_exceeded",
+                        "error_description": ("too many client registrations; retry later"),
+                    },
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                )
+
         if session_gated:
             session = require_session(request, session_store)
             if session is None:
