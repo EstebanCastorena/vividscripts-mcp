@@ -27,13 +27,17 @@ class ProjectSettings(BaseModel):
 
 
 class ProjectInfo(BaseModel):
-    """Returned by create/duplicate — minimum a caller needs to act."""
+    """Returned by create/duplicate — minimum a caller needs to act.
+
+    No server-side filesystem path is exposed: it's an internal
+    container detail, useless to a remote MCP client and a needless
+    info leak. Callers act via ``project_id`` / ``editor_url``.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     project_id: str
     project_name: str
-    project_path: str = Field(description="Server-side path, opaque to clients")
     editor_url: str
     created_at: datetime
 

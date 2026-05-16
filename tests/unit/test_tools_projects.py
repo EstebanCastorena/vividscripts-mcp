@@ -70,7 +70,7 @@ def test_create_project_returns_info_for_authenticated_user(
     tool = make_create_project_tool(backend)
     info = tool("I lived alone for years.", settings)
     assert info.project_id
-    assert info.project_path
+    assert info.project_name
     assert info.editor_url.startswith("https://app.vividscripts.test")
 
 

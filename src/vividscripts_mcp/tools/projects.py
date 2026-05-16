@@ -37,8 +37,14 @@ def make_create_project_tool(
     def create_project(story: str, settings: ProjectSettings) -> ProjectInfo:
         """Create a new VividScripts project from a story + settings.
 
-        Returns the project identifier, on-disk path, and an editor URL
-        the user can open to view/edit the result.
+        Returns the project id and an editor URL to open it.
+
+        When presenting this result to a user, show it as two plain
+        lines — not a table — so the link stays on one line and is
+        easy to click::
+
+            Project ID: <project_id>
+            Editor: <editor_url>
         """
         user_id = require_user_claims().sub
         return backend.create_project(user_id=user_id, story=story, settings=settings)
