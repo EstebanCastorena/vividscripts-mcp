@@ -14,6 +14,7 @@ from vividscripts_mcp.tools.media import (
     JobSubmission,
     make_animate_scene_tool,
     make_check_job_tool,
+    make_compile_video_tool,
     make_generate_audio_tool,
     make_generate_images_tool,
     make_generate_music_tool,
@@ -29,6 +30,7 @@ _GENERATE_FACTORIES = [
     (make_generate_thumbnail_tool, "generate_thumbnail"),
     (make_animate_scene_tool, "animate_scene"),
     (make_generate_music_tool, "generate_music"),
+    (make_compile_video_tool, "compile_video"),
 ]
 
 

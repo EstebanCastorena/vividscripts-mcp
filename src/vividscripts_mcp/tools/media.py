@@ -190,6 +190,37 @@ def make_generate_music_tool(
     return generate_music
 
 
+def make_compile_video_tool(
+    backend: BackendProtocol,
+) -> Callable[[str], JobSubmission]:
+    """Build the ``compile_video`` tool bound to ``backend`` (KAN-73)."""
+
+    def compile_video(project_id: str) -> JobSubmission:
+        """Start final video assembly (FFmpeg) for the project.
+
+        Async — returns a ``job_id`` immediately; poll ``check_job``
+        until terminal. Requires every scene to have an image + audio
+        and a short title (run the earlier media steps first).
+
+        On success ``check_job``'s ``result`` carries the compiled
+        ``video_path``; the shareable editor/watch URLs are added by
+        the magic-link handoff (KAN-33).
+
+        Present as one line:
+        ``Compile job started: <job_id> — poll check_job for progress.``
+        """
+        user_id = require_user_claims().sub
+        job_id = backend.submit_job(
+            user_id=user_id,
+            project_id=project_id,
+            job_type="compile_video",
+            params={},
+        )
+        return JobSubmission(job_id=job_id, job_type="compile_video")
+
+    return compile_video
+
+
 def make_select_music_tool(
     backend: BackendProtocol,
 ) -> Callable[[str, str], MusicSelection]:
@@ -235,5 +266,6 @@ def register_media_tools(mcp: FastMCP, backend: BackendProtocol) -> None:
     mcp.tool()(make_generate_thumbnail_tool(backend))
     mcp.tool()(make_animate_scene_tool(backend))
     mcp.tool()(make_generate_music_tool(backend))
+    mcp.tool()(make_compile_video_tool(backend))
     mcp.tool()(make_select_music_tool(backend))
     mcp.tool()(make_check_job_tool(backend))
