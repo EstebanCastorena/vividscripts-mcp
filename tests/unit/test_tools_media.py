@@ -12,9 +12,21 @@ from vividscripts_mcp.oauth.bearer import UserClaims
 from vividscripts_mcp.oauth.context import AuthRequired, set_user_claims
 from vividscripts_mcp.tools.media import (
     JobSubmission,
+    make_animate_scene_tool,
     make_check_job_tool,
     make_generate_audio_tool,
+    make_generate_images_tool,
+    make_generate_sfx_tool,
+    make_generate_thumbnail_tool,
 )
+
+_GENERATE_FACTORIES = [
+    (make_generate_audio_tool, "generate_audio"),
+    (make_generate_images_tool, "generate_images"),
+    (make_generate_sfx_tool, "generate_sfx"),
+    (make_generate_thumbnail_tool, "generate_thumbnail"),
+    (make_animate_scene_tool, "animate_scene"),
+]
 
 
 def _claims(sub: str = "user-alpha") -> UserClaims:
@@ -83,3 +95,23 @@ def test_generate_audio_requires_auth(backend: MockBackend, project_id: str) -> 
 def test_check_job_requires_auth(backend: MockBackend) -> None:
     with pytest.raises(AuthRequired):
         make_check_job_tool(backend)("any")
+
+
+@pytest.mark.parametrize(("factory", "job_type"), _GENERATE_FACTORIES)
+def test_all_generate_tools_return_typed_job_handle(
+    backend: MockBackend, project_id: str, _auth: None, factory, job_type
+) -> None:
+    sub = factory(backend)(project_id)
+    assert isinstance(sub, JobSubmission)
+    assert sub.job_id
+    assert sub.job_type == job_type
+    # And the job is then pollable by the same backend.
+    assert make_check_job_tool(backend)(sub.job_id).job_type == job_type
+
+
+@pytest.mark.parametrize(("factory", "job_type"), _GENERATE_FACTORIES)
+def test_all_generate_tools_require_auth(
+    backend: MockBackend, project_id: str, factory, job_type
+) -> None:
+    with pytest.raises(AuthRequired):
+        factory(backend)(project_id)
