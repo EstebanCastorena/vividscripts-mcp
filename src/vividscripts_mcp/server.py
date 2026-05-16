@@ -177,7 +177,14 @@ def build_app(
         Route(JWKS_PATH, endpoint=jwks_endpoint, methods=["GET"]),
         Route(
             "/oauth/register",
-            endpoint=make_register_handler(resolved_client_store, resolved_session_store),
+            endpoint=make_register_handler(
+                resolved_client_store,
+                resolved_session_store,
+                # Broker mode: open DCR per RFC 7591 — Cognito Hosted UI
+                # is the real auth gate (KAN-85). Offline keeps the
+                # session gate (KAN-46).
+                session_gated=cognito is None,
+            ),
             methods=["POST"],
         ),
         Route(

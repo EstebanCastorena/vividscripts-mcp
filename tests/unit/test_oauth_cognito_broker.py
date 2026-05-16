@@ -37,6 +37,7 @@ from vividscripts_mcp.oauth.bearer import (
 )
 from vividscripts_mcp.oauth.codes import MockAuthCodeStore, MockAuthRequestStateStore
 from vividscripts_mcp.oauth.cognito import CognitoConfig, CognitoTokens
+from vividscripts_mcp.oauth.dcr import BROKER_CLIENT_OWNER
 from vividscripts_mcp.oauth.keys import ALGORITHM, KID, get_signing_key, reset_signing_key
 from vividscripts_mcp.oauth.session import MockSessionStore
 from vividscripts_mcp.oauth.store import MockClientStore, RegisteredClient
@@ -408,6 +409,25 @@ def test_mock_idp_not_mounted_in_broker_mode(http: TestClient) -> None:
     response = http.get("/_mock_idp/login", params={"request_id": "x"})
     assert response.status_code != 302
     assert "Mock IdP" not in response.text
+
+
+def test_broker_dcr_is_open_no_session_required(
+    http: TestClient, client_store: MockClientStore
+) -> None:
+    """In broker mode DCR must succeed without a prior session cookie —
+    Claude Code registers before any login (Cognito is the real gate)."""
+    resp = http.post(
+        "/oauth/register",
+        json={
+            "redirect_uris": ["http://127.0.0.1:8080/callback"],
+            "client_name": "Claude Code",
+        },
+    )
+    assert resp.status_code == 201
+    client_id = resp.json()["client_id"]
+    stored = client_store.get(client_id)
+    assert stored is not None
+    assert stored.owner_user_id == BROKER_CLIENT_OWNER
 
 
 def test_prm_advertises_real_deployment(http: TestClient) -> None:
