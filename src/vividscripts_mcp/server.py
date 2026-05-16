@@ -58,6 +58,7 @@ from vividscripts_mcp.oauth.session import MockSessionStore, SessionStore
 from vividscripts_mcp.oauth.store import ClientStore, MockClientStore
 from vividscripts_mcp.oauth.token import make_token_handler
 from vividscripts_mcp.oauth.tokens import MockRefreshTokenStore, RefreshTokenStore
+from vividscripts_mcp.tools.handoff import register_handoff_tools
 from vividscripts_mcp.tools.media import register_media_tools
 from vividscripts_mcp.tools.projects import (
     make_create_project_tool,
@@ -131,6 +132,9 @@ def create_mcp_server(
 
     # KAN-69+ — async media-generation tools (generate_audio, check_job, …).
     register_media_tools(mcp, backend)
+
+    # KAN-77 — URL handoff (mint_magic_link, get_video_download_url).
+    register_handoff_tools(mcp, backend)
 
     return mcp
 
