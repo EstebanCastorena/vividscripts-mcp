@@ -194,7 +194,6 @@ class MockBackend:
             return ProjectInfo(
                 project_id=project_id,
                 project_name=project_name,
-                project_path=f"/mock/projects/{user_id}/{project_name}",
                 editor_url=self._editor_url(project_name),
                 created_at=state.created_at,
             )
@@ -253,7 +252,6 @@ class MockBackend:
             return ProjectInfo(
                 project_id=new_id,
                 project_name=name,
-                project_path=f"/mock/projects/{user_id}/{name}",
                 editor_url=self._editor_url(name),
                 created_at=dup.created_at,
             )
