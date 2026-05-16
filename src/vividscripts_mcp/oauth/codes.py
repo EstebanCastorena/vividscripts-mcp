@@ -45,7 +45,13 @@ class AuthRequestState(BaseModel):
 
 
 class AuthCode(BaseModel):
-    """An authorization code issued after user authentication."""
+    """An authorization code issued after user authentication.
+
+    In the Cognito broker (KAN-85 / KAN-36 pass-through) the one-shot
+    code also carries the Cognito tokens captured at ``/oauth/callback``,
+    so ``/oauth/token`` can return them instead of self-minting. They
+    stay ``None`` on the offline mock-IdP path (self-mint).
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -57,6 +63,9 @@ class AuthCode(BaseModel):
     scope: str | None
     user_id: str
     expires_at: int
+    cognito_access_token: str | None = None
+    cognito_refresh_token: str | None = None
+    cognito_expires_in: int | None = None
 
 
 @runtime_checkable

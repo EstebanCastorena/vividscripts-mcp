@@ -20,7 +20,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import BaseRoute, Mount, Route
 
 from vividscripts_mcp.adapters.base import BackendProtocol
 from vividscripts_mcp.adapters.mock import MockBackend
@@ -32,17 +32,21 @@ from vividscripts_mcp.oauth.bearer import (
     jwks_endpoint,
     validate_bearer_token,
 )
+from vividscripts_mcp.oauth.callback import make_callback_handler
 from vividscripts_mcp.oauth.codes import (
     AuthCodeStore,
     AuthRequestStateStore,
     MockAuthCodeStore,
     MockAuthRequestStateStore,
 )
+from vividscripts_mcp.oauth.cognito import CognitoConfig
 from vividscripts_mcp.oauth.dcr import make_register_handler
 from vividscripts_mcp.oauth.metadata import (
+    AS_METADATA_PATH,
     PRM_PATH,
     BearerEnforcementMiddleware,
-    protected_resource_metadata,
+    make_as_metadata_handler,
+    make_prm_handler,
 )
 from vividscripts_mcp.oauth.mock_idp import LOGIN_PATH as MOCK_IDP_LOGIN_PATH
 from vividscripts_mcp.oauth.mock_idp import make_login_handler
@@ -99,6 +103,7 @@ def build_app(
     code_store: AuthCodeStore | None = None,
     refresh_token_store: RefreshTokenStore | None = None,
     jwks_provider: JWKSProvider | None = None,
+    cognito: CognitoConfig | None = None,
 ) -> Starlette:
     """Assemble the ASGI app: Starlette host + mounted FastMCP streamable HTTP.
 
@@ -114,8 +119,15 @@ def build_app(
 
     All four stores are injectable so tests can pre-populate them and
     inspect persisted state. They default to in-memory mocks — appropriate
-    for the Phase 1 dev server; Phase 3 swaps the mocks for production
-    backings (Cognito sessions, Secrets Manager clients).
+    for the offline dev server.
+
+    Passing ``cognito`` flips the app into **broker mode** (KAN-85):
+    ``/oauth/authorize`` delegates to Cognito Hosted UI, ``/oauth/callback``
+    is mounted, ``/oauth/token`` passes Cognito tokens through, the
+    Bearer validator checks Cognito access tokens, the PRM/AS-metadata
+    documents advertise the real deployment, and the offline mock IdP is
+    **not** mounted. With ``cognito`` unset everything stays offline
+    (mock IdP + self-mint) so the unit suite runs without a network.
     """
     resolved_client_store: ClientStore = (
         client_store if client_store is not None else MockClientStore()
@@ -137,37 +149,81 @@ def build_app(
     )
     resolved_backend: BackendProtocol = backend if backend is not None else MockBackend()
 
-    def _validate(token: str) -> object | None:
-        return validate_bearer_token(token, resolved_jwks_provider)
+    if cognito is not None:
 
-    mcp = create_mcp_server(resolved_backend)
-    inner = mcp.streamable_http_app()
-    return Starlette(
-        routes=[
-            Route("/health", endpoint=health, methods=["GET"]),
-            Route(PRM_PATH, endpoint=protected_resource_metadata, methods=["GET"]),
-            Route(JWKS_PATH, endpoint=jwks_endpoint, methods=["GET"]),
-            Route(
-                "/oauth/register",
-                endpoint=make_register_handler(resolved_client_store, resolved_session_store),
-                methods=["POST"],
+        def _validate(token: str) -> object | None:
+            return validate_bearer_token(
+                token,
+                resolved_jwks_provider,
+                issuer=cognito.issuer,
+                audience=None,  # Cognito access tokens have no ``aud``.
+                expected_client_id=cognito.client_id,
+            )
+
+        prm_handler = make_prm_handler(
+            resource=f"{cognito.public_base_url}/mcp",
+            authorization_servers=[cognito.public_base_url],
+        )
+    else:
+
+        def _validate(token: str) -> object | None:
+            return validate_bearer_token(token, resolved_jwks_provider)
+
+        prm_handler = make_prm_handler()
+
+    routes: list[BaseRoute] = [
+        Route("/health", endpoint=health, methods=["GET"]),
+        Route(PRM_PATH, endpoint=prm_handler, methods=["GET"]),
+        Route(JWKS_PATH, endpoint=jwks_endpoint, methods=["GET"]),
+        Route(
+            "/oauth/register",
+            endpoint=make_register_handler(resolved_client_store, resolved_session_store),
+            methods=["POST"],
+        ),
+        Route(
+            "/oauth/authorize",
+            endpoint=make_authorize_handler(
+                resolved_client_store, resolved_request_state_store, cognito
             ),
+            methods=["GET"],
+        ),
+        Route(
+            "/oauth/token",
+            endpoint=make_token_handler(
+                resolved_client_store,
+                resolved_code_store,
+                resolved_refresh_token_store,
+                cognito,
+            ),
+            methods=["POST"],
+        ),
+    ]
+
+    if cognito is not None:
+        # Broker mode: the package is the AS facade Claude Code
+        # discovers (RFC 8414) and Cognito redirects back to.
+        routes.append(
             Route(
-                "/oauth/authorize",
-                endpoint=make_authorize_handler(
-                    resolved_client_store, resolved_request_state_store
+                AS_METADATA_PATH,
+                endpoint=make_as_metadata_handler(cognito.public_base_url),
+                methods=["GET"],
+            )
+        )
+        routes.append(
+            Route(
+                "/oauth/callback",
+                endpoint=make_callback_handler(
+                    resolved_request_state_store,
+                    resolved_code_store,
+                    cognito,
                 ),
                 methods=["GET"],
-            ),
-            Route(
-                "/oauth/token",
-                endpoint=make_token_handler(
-                    resolved_client_store,
-                    resolved_code_store,
-                    resolved_refresh_token_store,
-                ),
-                methods=["POST"],
-            ),
+            )
+        )
+    else:
+        # Offline mode only: the mock IdP must never be mounted in a
+        # production (broker) build.
+        routes.append(
             Route(
                 MOCK_IDP_LOGIN_PATH,
                 endpoint=make_login_handler(
@@ -176,9 +232,14 @@ def build_app(
                     resolved_code_store,
                 ),
                 methods=["GET", "POST"],
-            ),
-            Mount("/", app=inner),
-        ],
+            )
+        )
+
+    mcp = create_mcp_server(resolved_backend)
+    inner = mcp.streamable_http_app()
+    routes.append(Mount("/", app=inner))
+    return Starlette(
+        routes=routes,
         middleware=[Middleware(BearerEnforcementMiddleware, validator=_validate)],
         lifespan=inner.router.lifespan_context,
     )

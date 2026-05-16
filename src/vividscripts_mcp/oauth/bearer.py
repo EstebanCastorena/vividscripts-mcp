@@ -93,9 +93,27 @@ def validate_bearer_token(
     provider: JWKSProvider,
     *,
     issuer: str = DEFAULT_ISSUER,
-    audience: str = DEFAULT_AUDIENCE,
+    audience: str | None = DEFAULT_AUDIENCE,
+    expected_client_id: str | None = None,
 ) -> UserClaims | None:
     """Validate a Bearer JWT. Returns the claims on success, ``None`` on any failure.
+
+    Two modes, selected by the caller (``server.build_app``):
+
+    - **Offline** (``audience`` set, ``expected_client_id`` unset) — the
+      Phase-1 self-minted token carries ``aud``; it's checked by
+      ``jwt.decode``. This is the default, so existing callers are
+      unaffected.
+    - **Cognito broker** (KAN-85: ``audience=None``,
+      ``expected_client_id`` set) — Cognito **access** tokens carry no
+      ``aud``; audience verification is disabled and the app-client
+      identity is enforced manually against the ``client_id`` claim,
+      mirroring the slide_editor ``cognito_auth.decode_bearer_token``
+      contract (KAN-64).
+
+    In both modes RS256 is pinned (no algorithm fallback), the issuer is
+    checked, ``token_use`` must be ``access``, and the ``kid`` must
+    resolve via the injected JWKS provider.
 
     The function deliberately returns ``None`` (rather than raising) so
     the calling middleware can produce a consistent 401 response without
@@ -121,18 +139,26 @@ def validate_bearer_token(
     except jwt.PyJWKError:
         return None
 
+    decode_kwargs: dict[str, Any] = {
+        "algorithms": [ALGORITHM],  # Explicit — RS256 only, no fallback.
+        "issuer": issuer,
+    }
+    if audience is not None:
+        decode_kwargs["audience"] = audience
+    else:
+        # Cognito access tokens have no ``aud``; identity is enforced
+        # below against ``client_id`` instead.
+        decode_kwargs["options"] = {"verify_aud": False}
+
     try:
-        claims = jwt.decode(
-            token,
-            key=key,
-            algorithms=[ALGORITHM],  # Explicit — RS256 only, no fallback.
-            audience=audience,
-            issuer=issuer,
-        )
+        claims = jwt.decode(token, key=key, **decode_kwargs)
     except jwt.InvalidTokenError:
         return None
 
     if claims.get("token_use") != "access":
+        return None
+
+    if expected_client_id is not None and claims.get("client_id") != expected_client_id:
         return None
 
     try:

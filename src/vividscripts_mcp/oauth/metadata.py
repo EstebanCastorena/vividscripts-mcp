@@ -16,7 +16,7 @@ real deployment host) lands in Phase 3.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -29,12 +29,19 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 #: suffix is ``oauth-protected-resource``.
 PRM_PATH = "/.well-known/oauth-protected-resource"
 
-#: Canonical identifier of the protected resource (the MCP endpoint). Phase 1
-#: placeholder; production binds this to the real deployment host.
+#: Path the RFC 8414 Authorization Server Metadata document is served
+#: from. In the broker (KAN-85) the package *is* the authorization
+#: server Claude Code registers/authorizes against (it brokers to
+#: Cognito underneath), so it must publish this for client discovery.
+AS_METADATA_PATH = "/.well-known/oauth-authorization-server"
+
+#: Canonical identifier of the protected resource (the MCP endpoint).
+#: Offline-mode placeholder; the broker passes the real deployment URL.
 _RESOURCE = "https://app.vividscripts.com/mcp"
 
-#: Issuer identifiers of the OAuth authorization servers that mint tokens for
-#: this resource. Phase 1 placeholder; production lists the Cognito issuer.
+#: Issuer identifiers of the OAuth authorization servers that mint tokens
+#: for this resource. Offline-mode placeholder; the broker passes the
+#: package's own facade base URL (it brokers to Cognito).
 _AUTHORIZATION_SERVERS: tuple[str, ...] = ("https://app.vividscripts.com",)
 
 #: GitHub URL of the human-readable auth docs (KAN-55 writes the page).
@@ -60,11 +67,25 @@ class ProtectedResourceMetadata(BaseModel):
     resource_signing_alg_values_supported: list[str]
 
 
-def build_prm_payload() -> ProtectedResourceMetadata:
-    """Return the Phase 1 PRM document with placeholder issuer + AS URLs."""
+def build_prm_payload(
+    *,
+    resource: str = _RESOURCE,
+    authorization_servers: list[str] | None = None,
+) -> ProtectedResourceMetadata:
+    """Build the RFC 9728 PRM document.
+
+    Defaults are the offline-mode placeholders; the broker
+    (``server.build_app`` with a ``CognitoConfig``) passes the real
+    deployment ``resource`` and the package's own facade base URL as the
+    authorization server.
+    """
     return ProtectedResourceMetadata(
-        resource=_RESOURCE,
-        authorization_servers=list(_AUTHORIZATION_SERVERS),
+        resource=resource,
+        authorization_servers=(
+            authorization_servers
+            if authorization_servers is not None
+            else list(_AUTHORIZATION_SERVERS)
+        ),
         bearer_methods_supported=["header"],
         resource_documentation=_RESOURCE_DOCUMENTATION,
         scopes_supported=["openid", "profile", "email"],
@@ -72,9 +93,79 @@ def build_prm_payload() -> ProtectedResourceMetadata:
     )
 
 
+def make_prm_handler(
+    *,
+    resource: str = _RESOURCE,
+    authorization_servers: list[str] | None = None,
+) -> Callable[[Request], Awaitable[JSONResponse]]:
+    """Build the ``GET /.well-known/oauth-protected-resource`` handler."""
+
+    async def handler(_request: Request) -> JSONResponse:
+        return JSONResponse(
+            build_prm_payload(
+                resource=resource,
+                authorization_servers=authorization_servers,
+            ).model_dump()
+        )
+
+    return handler
+
+
 async def protected_resource_metadata(_request: Request) -> JSONResponse:
-    """Serve the PRM document at ``GET /.well-known/oauth-protected-resource``."""
+    """Offline-default PRM handler (placeholder values)."""
     return JSONResponse(build_prm_payload().model_dump())
+
+
+class AuthorizationServerMetadata(BaseModel):
+    """RFC 8414 Authorization Server Metadata for the broker facade.
+
+    Only the fields a DCR + PKCE authorization-code client (Claude Code)
+    needs to discover the package's endpoints. ``extra="forbid"`` so
+    drift surfaces in tests.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    issuer: str
+    authorization_endpoint: str
+    token_endpoint: str
+    registration_endpoint: str
+    response_types_supported: list[str]
+    grant_types_supported: list[str]
+    code_challenge_methods_supported: list[str]
+    token_endpoint_auth_methods_supported: list[str]
+    scopes_supported: list[str]
+
+
+def build_as_metadata_payload(base_url: str) -> AuthorizationServerMetadata:
+    """RFC 8414 document advertising the package's own ``/oauth`` facade.
+
+    ``base_url`` is the package's external base (no trailing slash). The
+    facade brokers to Cognito underneath, but to Claude Code it *is* the
+    authorization server it registers and authorizes against.
+    """
+    return AuthorizationServerMetadata(
+        issuer=base_url,
+        authorization_endpoint=f"{base_url}/oauth/authorize",
+        token_endpoint=f"{base_url}/oauth/token",
+        registration_endpoint=f"{base_url}/oauth/register",
+        response_types_supported=["code"],
+        grant_types_supported=["authorization_code", "refresh_token"],
+        code_challenge_methods_supported=["S256"],
+        token_endpoint_auth_methods_supported=["none"],
+        scopes_supported=["openid", "profile", "email"],
+    )
+
+
+def make_as_metadata_handler(
+    base_url: str,
+) -> Callable[[Request], Awaitable[JSONResponse]]:
+    """Build the ``GET /.well-known/oauth-authorization-server`` handler."""
+
+    async def handler(_request: Request) -> JSONResponse:
+        return JSONResponse(build_as_metadata_payload(base_url).model_dump())
+
+    return handler
 
 
 def _is_mcp_path(path: str) -> bool:

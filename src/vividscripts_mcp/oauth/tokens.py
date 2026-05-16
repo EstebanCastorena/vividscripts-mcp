@@ -1,13 +1,17 @@
-"""Access and refresh token primitives for ``/oauth/token``.
+"""Self-mint token primitives — **offline / test mode only**.
 
-Phase 1 mints locally-signed RS256 JWTs as access tokens and opaque
-random strings as refresh tokens, stored in :class:`MockRefreshTokenStore`.
+These mint locally-signed RS256 JWTs and opaque refresh tokens stored
+in :class:`MockRefreshTokenStore`. The issuer/audience are placeholders
+aligned with the offline PRM document so the Bearer validator accepts
+them without a network.
 
-The issuer and audience are Phase 1 placeholders shared with KAN-48's
-PRM document — so a Bearer validator built against the PRM's
-``authorization_servers`` claim accepts these tokens. Phase 3 replaces
-both the signing path (Cognito mints) and the refresh store (Cognito
-manages refresh tokens server-side).
+The production **broker** path (KAN-85 / KAN-36 Cognito-direct
+pass-through) does **not** use any of this: ``/oauth/token`` returns the
+Cognito tokens captured at ``/oauth/callback`` and the Bearer validator
+checks Cognito's JWKS. ``server.build_app`` only wires the self-mint
+path when no ``CognitoConfig`` is supplied — i.e. the offline unit
+suite and local dev. Kept (not deleted) precisely so that suite still
+runs without AWS/Cognito.
 """
 
 from __future__ import annotations
