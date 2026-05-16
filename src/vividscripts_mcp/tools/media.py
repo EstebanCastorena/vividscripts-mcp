@@ -62,6 +62,108 @@ def make_generate_audio_tool(
     return generate_audio
 
 
+def make_generate_images_tool(
+    backend: BackendProtocol,
+) -> Callable[[str], JobSubmission]:
+    """Build the ``generate_images`` tool bound to ``backend`` (KAN-70)."""
+
+    def generate_images(project_id: str) -> JobSubmission:
+        """Start image generation for every scene in the project.
+
+        Async — returns a ``job_id`` immediately; poll ``check_job``.
+        The project must already have scenes with image directions.
+
+        Present as one line:
+        ``Image job started: <job_id> — poll check_job for progress.``
+        """
+        user_id = require_user_claims().sub
+        job_id = backend.submit_job(
+            user_id=user_id,
+            project_id=project_id,
+            job_type="generate_images",
+            params={},
+        )
+        return JobSubmission(job_id=job_id, job_type="generate_images")
+
+    return generate_images
+
+
+def make_generate_sfx_tool(
+    backend: BackendProtocol,
+) -> Callable[[str], JobSubmission]:
+    """Build the ``generate_sfx`` tool bound to ``backend`` (KAN-71)."""
+
+    def generate_sfx(project_id: str) -> JobSubmission:
+        """Start sound-effect analysis + generation for the project.
+
+        Async — returns a ``job_id`` immediately; poll ``check_job``.
+
+        Present as one line:
+        ``SFX job started: <job_id> — poll check_job for progress.``
+        """
+        user_id = require_user_claims().sub
+        job_id = backend.submit_job(
+            user_id=user_id,
+            project_id=project_id,
+            job_type="generate_sfx",
+            params={},
+        )
+        return JobSubmission(job_id=job_id, job_type="generate_sfx")
+
+    return generate_sfx
+
+
+def make_generate_thumbnail_tool(
+    backend: BackendProtocol,
+) -> Callable[[str], JobSubmission]:
+    """Build the ``generate_thumbnail`` tool bound to ``backend`` (KAN-72)."""
+
+    def generate_thumbnail(project_id: str) -> JobSubmission:
+        """Start YouTube-thumbnail generation for the project.
+
+        Async — returns a ``job_id`` immediately; poll ``check_job``.
+
+        Present as one line:
+        ``Thumbnail job started: <job_id> — poll check_job for progress.``
+        """
+        user_id = require_user_claims().sub
+        job_id = backend.submit_job(
+            user_id=user_id,
+            project_id=project_id,
+            job_type="generate_thumbnail",
+            params={},
+        )
+        return JobSubmission(job_id=job_id, job_type="generate_thumbnail")
+
+    return generate_thumbnail
+
+
+def make_animate_scene_tool(
+    backend: BackendProtocol,
+) -> Callable[[str], JobSubmission]:
+    """Build the ``animate_scene`` tool bound to ``backend`` (KAN-72)."""
+
+    def animate_scene(project_id: str) -> JobSubmission:
+        """Start image-to-video animation of the project's intro scenes.
+
+        Async — returns a ``job_id`` immediately; poll ``check_job``.
+        Requires generated images first.
+
+        Present as one line:
+        ``Animation job started: <job_id> — poll check_job for progress.``
+        """
+        user_id = require_user_claims().sub
+        job_id = backend.submit_job(
+            user_id=user_id,
+            project_id=project_id,
+            job_type="animate_scene",
+            params={},
+        )
+        return JobSubmission(job_id=job_id, job_type="animate_scene")
+
+    return animate_scene
+
+
 def make_check_job_tool(
     backend: BackendProtocol,
 ) -> Callable[[str], JobStatus]:
@@ -84,4 +186,8 @@ def make_check_job_tool(
 def register_media_tools(mcp: FastMCP, backend: BackendProtocol) -> None:
     """Register the Phase-4 media tools on the FastMCP server."""
     mcp.tool()(make_generate_audio_tool(backend))
+    mcp.tool()(make_generate_images_tool(backend))
+    mcp.tool()(make_generate_sfx_tool(backend))
+    mcp.tool()(make_generate_thumbnail_tool(backend))
+    mcp.tool()(make_animate_scene_tool(backend))
     mcp.tool()(make_check_job_tool(backend))
