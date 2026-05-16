@@ -58,6 +58,7 @@ from vividscripts_mcp.oauth.session import MockSessionStore, SessionStore
 from vividscripts_mcp.oauth.store import ClientStore, MockClientStore
 from vividscripts_mcp.oauth.token import make_token_handler
 from vividscripts_mcp.oauth.tokens import MockRefreshTokenStore, RefreshTokenStore
+from vividscripts_mcp.tools.media import register_media_tools
 from vividscripts_mcp.tools.projects import (
     make_create_project_tool,
     make_get_project_tool,
@@ -127,6 +128,9 @@ def create_mcp_server(
 
     # KAN-59 — save_step_result + get_workflow_state + custom overrides.
     register_state_tools(mcp, backend)
+
+    # KAN-69+ — async media-generation tools (generate_audio, check_job, …).
+    register_media_tools(mcp, backend)
 
     return mcp
 
