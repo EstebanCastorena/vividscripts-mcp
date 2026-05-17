@@ -20,6 +20,8 @@ from vividscripts_mcp.tools.media import (
     make_generate_music_tool,
     make_generate_sfx_tool,
     make_generate_thumbnail_tool,
+    make_regenerate_scene_audio_tool,
+    make_regenerate_scene_image_tool,
     make_select_music_tool,
 )
 
@@ -146,3 +148,31 @@ def test_select_music_unknown_mood_needs_generation(
 def test_select_music_requires_auth(backend: MockBackend, project_id: str) -> None:
     with pytest.raises(AuthRequired):
         make_select_music_tool(backend)(project_id, "dark-tension")
+
+
+@pytest.mark.parametrize(
+    ("factory", "job_type"),
+    [
+        (make_regenerate_scene_image_tool, "regenerate_scene_image"),
+        (make_regenerate_scene_audio_tool, "regenerate_scene_audio"),
+    ],
+)
+def test_regenerate_scene_tools_return_job_handle(
+    backend: MockBackend, project_id: str, _auth: None, factory, job_type
+) -> None:
+    sub = factory(backend)(project_id, 0)
+    assert isinstance(sub, JobSubmission)
+    assert sub.job_id
+    assert sub.job_type == job_type
+    assert make_check_job_tool(backend)(sub.job_id).job_type == job_type
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [make_regenerate_scene_image_tool, make_regenerate_scene_audio_tool],
+)
+def test_regenerate_scene_tools_require_auth(
+    backend: MockBackend, project_id: str, factory
+) -> None:
+    with pytest.raises(AuthRequired):
+        factory(backend)(project_id, 0)
