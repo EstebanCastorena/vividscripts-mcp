@@ -66,6 +66,7 @@ from vividscripts_mcp.tools.projects import (
     make_list_projects_tool,
 )
 from vividscripts_mcp.tools.prompts import register_prompts
+from vividscripts_mcp.tools.scenes import register_scene_tools
 from vividscripts_mcp.tools.state import register_state_tools
 
 SERVER_NAME = "vividscripts-mcp"
@@ -135,6 +136,9 @@ def create_mcp_server(
 
     # KAN-77 — URL handoff (mint_magic_link, get_video_download_url).
     register_handoff_tools(mcp, backend)
+
+    # KAN-78 — scene editing (bidirectional with the web editor).
+    register_scene_tools(mcp, backend)
 
     return mcp
 
