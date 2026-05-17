@@ -239,6 +239,57 @@ def make_select_music_tool(
     return select_music
 
 
+def make_regenerate_scene_image_tool(
+    backend: BackendProtocol,
+) -> Callable[[str, int], JobSubmission]:
+    """Build ``regenerate_scene_image`` bound to ``backend`` (KAN-79)."""
+
+    def regenerate_scene_image(project_id: str, scene_index: int) -> JobSubmission:
+        """Re-render just one scene's image from its current prompt.
+
+        Async — returns a ``job_id`` immediately; poll ``check_job``.
+        Only the target scene is regenerated; siblings are untouched.
+        After ``update_scene_prompt`` this picks up the new prompt.
+        """
+        user_id = require_user_claims().sub
+        job_id = backend.submit_job(
+            user_id=user_id,
+            project_id=project_id,
+            job_type="regenerate_scene_image",
+            params={"scene_index": scene_index},
+        )
+        return JobSubmission(job_id=job_id, job_type="regenerate_scene_image")
+
+    return regenerate_scene_image
+
+
+def make_regenerate_scene_audio_tool(
+    backend: BackendProtocol,
+) -> Callable[[str, int], JobSubmission]:
+    """Build ``regenerate_scene_audio`` bound to ``backend`` (KAN-79)."""
+
+    def regenerate_scene_audio(project_id: str, scene_index: int) -> JobSubmission:
+        """Re-synthesize just one scene's narration audio + word
+        timestamps from its current text.
+
+        Async — returns a ``job_id`` immediately; poll ``check_job``.
+        Only the target scene is regenerated. After
+        ``update_scene_text`` this picks up the new text; the scene's
+        word timestamps are regenerated too (SFX timing stays correct
+        on the next ``compile_video``).
+        """
+        user_id = require_user_claims().sub
+        job_id = backend.submit_job(
+            user_id=user_id,
+            project_id=project_id,
+            job_type="regenerate_scene_audio",
+            params={"scene_index": scene_index},
+        )
+        return JobSubmission(job_id=job_id, job_type="regenerate_scene_audio")
+
+    return regenerate_scene_audio
+
+
 def make_check_job_tool(
     backend: BackendProtocol,
 ) -> Callable[[str], JobStatus]:
@@ -268,4 +319,6 @@ def register_media_tools(mcp: FastMCP, backend: BackendProtocol) -> None:
     mcp.tool()(make_generate_music_tool(backend))
     mcp.tool()(make_compile_video_tool(backend))
     mcp.tool()(make_select_music_tool(backend))
+    mcp.tool()(make_regenerate_scene_image_tool(backend))
+    mcp.tool()(make_regenerate_scene_audio_tool(backend))
     mcp.tool()(make_check_job_tool(backend))
