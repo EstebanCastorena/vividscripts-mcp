@@ -29,6 +29,7 @@ seam for middleware-based limits later.
 from __future__ import annotations
 
 import secrets
+import urllib.parse
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -48,7 +49,17 @@ from vividscripts_mcp.oauth.store import ClientStore, RegisteredClient
 # of truth, not the client's request.
 _ALLOWED_GRANT_TYPES = frozenset({"authorization_code", "refresh_token"})
 _ALLOWED_RESPONSE_TYPES = frozenset({"code"})
-_ALLOWED_AUTH_METHODS = frozenset({"none", "client_secret_basic", "client_secret_post"})
+# KAN-97 #7 — restricted to {"none"} to match what the AS metadata document
+# advertises and what /oauth/token actually enforces. Any
+# ``client_secret_*`` method would advertise confidential-client semantics
+# the package does not implement (no secret is ever issued or verified).
+_ALLOWED_AUTH_METHODS = frozenset({"none"})
+
+# KAN-97 #8 — RFC 8252 §7 loopback host allow-list, exact-match against the
+# parsed hostname (not a string prefix). ``localhost.attacker.com`` does
+# not match ``localhost``; ``127.0.0.1.attacker.com`` does not match
+# ``127.0.0.1``.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class RegistrationRequest(BaseModel):
@@ -70,13 +81,35 @@ class RegistrationRequest(BaseModel):
 def _is_safe_redirect_uri(uri: str) -> bool:
     """Per RFC 8252 § 7: HTTPS, or loopback over HTTP (native clients).
 
-    Public-web HTTP redirect URIs are rejected — tokens travelling over
-    plaintext to an attacker-controlled domain is the classic OAuth leak.
+    Parses with :mod:`urllib.parse` and matches the hostname exactly
+    against the loopback allow-list, so ``http://localhost.attacker.com``
+    no longer slides through a naive ``startswith`` check (KAN-97 #8).
+    Rejects URIs that carry embedded credentials (``user:pass@host``) or
+    fragments — neither belongs in a registered ``redirect_uri``, and
+    both have been used in the past to obscure the real netloc.
     """
-    if uri.startswith("https://"):
+    try:
+        parsed = urllib.parse.urlsplit(uri)
+    except ValueError:
+        return False
+
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if parsed.fragment:
+        return False
+    # ``username``/``password`` are populated only when ``@`` appears in
+    # the netloc. Raw-``@`` URIs (no credential semantics) are also
+    # rejected to avoid format-confusion oracles.
+    if parsed.username is not None or parsed.password is not None or "@" in parsed.netloc:
+        return False
+    hostname = parsed.hostname
+    if not hostname:
+        return False
+
+    if parsed.scheme == "https":
         return True
-    loopback_prefixes = ("http://127.0.0.1", "http://localhost", "http://[::1]")
-    return any(uri.startswith(prefix) for prefix in loopback_prefixes)
+    # http: loopback-only.
+    return hostname in _LOOPBACK_HOSTS
 
 
 def _error_response(error: str, description: str, status_code: int) -> JSONResponse:

@@ -10,6 +10,7 @@ generated from a counter (not random) so test assertions stay simple.
 
 from __future__ import annotations
 
+import secrets
 import threading
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -423,17 +424,28 @@ class MockBackend:
         ttl_seconds: int = 300,
     ) -> tuple[str, datetime]:
         with self._lock:
-            state = self._require(user_id, project_id)
-            token = uuid.uuid4().hex[:12]
+            self._require(user_id, project_id)
+            # KAN-97 #9 — opaque server-generated token, no user_id PII in
+            # the URL and no user-controlled ``project_name`` raw-
+            # interpolated. The token is the only thing the redemption
+            # endpoint resolves back to (user, project, expiry). ``view``
+            # is kept in the query string but bounded by the tool layer
+            # to ``{editor, video}``.
+            token = secrets.token_urlsafe(24)
             expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
-            url = f"{self._base_url}/m/{token}?view={view}&project={state.project_name}"
+            url = f"{self._base_url}/m/{token}?view={view}"
             return url, expires_at
 
     def get_video_download_url(self, user_id: str, project_id: str) -> tuple[str, datetime]:
         with self._lock:
-            state = self._require(user_id, project_id)
+            self._require(user_id, project_id)
+            # KAN-97 #9 — opaque token, no user_id (OAuth ``sub``) in the
+            # URL path. Two consecutive calls produce different tokens so
+            # the URL genuinely expires at ``expires_at`` rather than
+            # silently aliasing to a stable structure-based path.
+            token = secrets.token_urlsafe(24)
             expires_at = datetime.now(UTC) + timedelta(hours=1)
-            url = f"{self._base_url}/api/video/{user_id}/{state.project_name}/output.mp4"
+            url = f"{self._base_url}/v/{token}/output.mp4"
             return url, expires_at
 
     # ----- private helpers --------------------------------------------------

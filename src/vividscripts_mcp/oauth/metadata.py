@@ -244,19 +244,30 @@ def _extract_bearer(headers: Headers) -> str | None:
     return token or None
 
 
-def _metadata_url(scope: Scope) -> str:
-    """Build the absolute URL of the PRM endpoint from the ASGI scope.
+def _metadata_url(scope: Scope, canonical_base_url: str | None = None) -> str:
+    """Build the absolute URL of the PRM endpoint.
 
-    Using the request's own host means a real client behind any deployment
-    URL (or a TestClient pointing at ``http://testserver``) gets back a
-    self-consistent ``resource_metadata`` URL it can actually fetch.
+    With ``canonical_base_url`` set (the broker / production path), the
+    URL is built from that trusted value and the request's ``Host`` /
+    ``X-Forwarded-*`` headers are ignored — see KAN-97 #11. Without it
+    (offline / dev), the URL is derived from the ASGI scope so a real
+    client behind any deployment URL (or a TestClient pointing at
+    ``http://testserver``) gets back a self-consistent
+    ``resource_metadata`` URL it can actually fetch.
 
-    Behind a TLS-terminating proxy (the production deployment runs behind
-    CloudFront → ALB) the ASGI ``scheme`` is ``http`` even though the
-    client spoke ``https``. Honor the proxy's ``X-Forwarded-Proto`` so
-    the advertised metadata URL stays ``https`` — a strict OAuth client
-    may reject a non-https resource-metadata pointer.
+    Behind a TLS-terminating proxy (the production deployment runs
+    behind CloudFront → ALB) the ASGI ``scheme`` is ``http`` even though
+    the client spoke ``https``. In the offline fallback we still honor
+    the proxy's ``X-Forwarded-Proto`` so the advertised metadata URL
+    stays ``https`` — a strict OAuth client may reject a non-https
+    resource-metadata pointer.
     """
+    if canonical_base_url is not None:
+        # Trust nothing from the request. The deployment's canonical
+        # external URL is the authoritative source for what clients
+        # should fetch back.
+        return f"{canonical_base_url.rstrip('/')}{PRM_PATH}"
+
     headers = Headers(scope=scope)
     host = headers.get("host")
     if host is None:
@@ -319,9 +330,14 @@ class BearerEnforcementMiddleware:
         self,
         app: ASGIApp,
         validator: BearerValidator | None = None,
+        canonical_base_url: str | None = None,
     ) -> None:
         self.app = app
         self.validator = validator
+        # KAN-97 #11 — when set, the WWW-Authenticate metadata URL is
+        # derived from this trusted value instead of the (untrusted)
+        # request ``Host`` / ``X-Forwarded-*`` headers.
+        self.canonical_base_url = canonical_base_url
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -373,7 +389,7 @@ class BearerEnforcementMiddleware:
         send: Send,
         error: str | None = None,
     ) -> None:
-        challenge = f'Bearer resource_metadata="{_metadata_url(scope)}"'
+        challenge = f'Bearer resource_metadata="{_metadata_url(scope, self.canonical_base_url)}"'
         if error is not None:
             challenge += f', error="{error}"'
         response = Response(

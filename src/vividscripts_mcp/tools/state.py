@@ -34,6 +34,11 @@ from vividscripts_mcp.oauth.context import require_user_claims
 from vividscripts_mcp.prompts import PROMPT_INTERFACES
 from vividscripts_mcp.schemas import validate_step_result
 
+# KAN-97 #10 — bound the custom-prompt template. 50_000 chars covers any
+# legitimate template (the longest shipped prompt is ~3k chars) while
+# refusing memory-exhaustion payloads.
+_MAX_TEMPLATE_CHARS = 50_000
+
 
 class CustomOverride(BaseModel):
     """Returned by get_custom_prompt_override."""
@@ -141,6 +146,8 @@ def make_set_custom_prompt_override_tool(
         Rejects unknown step names — a custom override for a prompt that
         doesn't exist could never be served and would just accumulate.
         """
+        if len(template) > _MAX_TEMPLATE_CHARS:
+            raise ValueError(f"template is {len(template)} chars; max is {_MAX_TEMPLATE_CHARS}")
         user_id = require_user_claims().sub
         if step_name not in PROMPT_INTERFACES:
             raise ValueError(

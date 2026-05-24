@@ -25,6 +25,12 @@ from vividscripts_mcp.adapters.base import BackendProtocol
 from vividscripts_mcp.models import Scene
 from vividscripts_mcp.oauth.context import require_user_claims
 
+# KAN-97 #10 — bound the free-text fields. A scene's narration and a
+# single image prompt both comfortably fit in 10_000 chars; the cap
+# refuses memory-exhaustion payloads without constraining real edits.
+_MAX_SCENE_TEXT_CHARS = 10_000
+_MAX_SCENE_PROMPT_CHARS = 10_000
+
 
 class SceneAck(BaseModel):
     """Returned by update/remove scene tools."""
@@ -77,6 +83,10 @@ def make_update_scene_prompt_tool(
     def update_scene_prompt(project_id: str, scene_index: int, new_prompt: str) -> SceneAck:
         """Replace a scene's image prompt. Visible in the web editor on
         refresh; run ``regenerate_scene_image`` to re-render."""
+        if len(new_prompt) > _MAX_SCENE_PROMPT_CHARS:
+            raise ValueError(
+                f"new_prompt is {len(new_prompt)} chars; max is {_MAX_SCENE_PROMPT_CHARS}"
+            )
         user_id = require_user_claims().sub
         backend.update_scene(
             user_id=user_id,
@@ -97,6 +107,8 @@ def make_update_scene_text_tool(
     def update_scene_text(project_id: str, scene_index: int, new_text: str) -> SceneAck:
         """Replace a scene's narration text. Run
         ``regenerate_scene_audio`` to re-synthesize."""
+        if len(new_text) > _MAX_SCENE_TEXT_CHARS:
+            raise ValueError(f"new_text is {len(new_text)} chars; max is {_MAX_SCENE_TEXT_CHARS}")
         user_id = require_user_claims().sub
         backend.update_scene(
             user_id=user_id,
@@ -117,6 +129,8 @@ def make_add_scene_tool(
     def add_scene(project_id: str, after_index: int, text: str) -> AddSceneAck:
         """Insert a new scene after ``after_index`` (0-based) with the
         given narration text. Downstream scenes are re-indexed."""
+        if len(text) > _MAX_SCENE_TEXT_CHARS:
+            raise ValueError(f"text is {len(text)} chars; max is {_MAX_SCENE_TEXT_CHARS}")
         user_id = require_user_claims().sub
         new_index = backend.add_scene(
             user_id=user_id,

@@ -23,6 +23,15 @@ from vividscripts_mcp.adapters.base import BackendProtocol
 from vividscripts_mcp.models import MagicLinkUrl
 from vividscripts_mcp.oauth.context import require_user_claims
 
+# KAN-97 #10 — the docstring promises ≤5 min. Enforce it server-side so
+# a caller cannot defeat the "short-lived link" security premise.
+_MAGIC_LINK_TTL_MIN = 1
+_MAGIC_LINK_TTL_MAX = 300
+# KAN-97 #9 — ``view`` reaches the URL; bound to the two values the
+# redemption endpoint understands instead of raw-interpolating an
+# arbitrary string.
+_ALLOWED_VIEWS = frozenset({"editor", "video"})
+
 
 def make_mint_magic_link_tool(
     backend: BackendProtocol,
@@ -38,6 +47,13 @@ def make_mint_magic_link_tool(
         single-use and expires fast (≤5 min) — present it to the user
         to click promptly, don't store it. Returns ``{url, expires_at}``.
         """
+        if view not in _ALLOWED_VIEWS:
+            raise ValueError(f"view must be one of {sorted(_ALLOWED_VIEWS)}; got {view!r}")
+        if not (_MAGIC_LINK_TTL_MIN <= ttl_seconds <= _MAGIC_LINK_TTL_MAX):
+            raise ValueError(
+                "ttl_seconds must be between "
+                f"{_MAGIC_LINK_TTL_MIN} and {_MAGIC_LINK_TTL_MAX}; got {ttl_seconds}"
+            )
         user_id = require_user_claims().sub
         url, expires_at = backend.mint_magic_link(
             user_id=user_id,

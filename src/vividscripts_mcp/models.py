@@ -14,16 +14,26 @@ from pydantic import BaseModel, ConfigDict, Field
 StepStatus = Literal["pending", "running", "completed", "failed", "skipped"]
 JobStatusLiteral = Literal["queued", "running", "completed", "failed"]
 
+# KAN-97 #9 — every value that ends up as a URL segment or filesystem
+# component must match this. Restrictive on purpose: alphanumerics plus
+# ``_`` and ``-`` is enough for human-readable names, and rules out
+# ``../``, ``?``, ``@``, encoded slashes, and whitespace in one shot.
+PROJECT_NAME_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+
 
 class ProjectSettings(BaseModel):
     """Settings supplied when creating a project."""
 
     model_config = ConfigDict(extra="forbid")
 
-    style: str = Field(default="vintage_illustrated", description="Art style key")
+    # KAN-97 #10 — style/music_mood are keys, not prose. Bound to keep an
+    # unbounded string from reaching the prompt template / catalog lookup.
+    style: str = Field(default="vintage_illustrated", description="Art style key", max_length=64)
     voice: Literal["male", "female"] = Field(default="male")
     dimension: Literal["landscape", "portrait"] = Field(default="landscape")
-    music_mood: str | None = Field(default=None, description="Optional mood override")
+    music_mood: str | None = Field(
+        default=None, description="Optional mood override", max_length=64
+    )
 
 
 class ProjectInfo(BaseModel):
@@ -37,7 +47,7 @@ class ProjectInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     project_id: str
-    project_name: str
+    project_name: str = Field(pattern=PROJECT_NAME_PATTERN)
     editor_url: str
     created_at: datetime
 
@@ -48,7 +58,7 @@ class ProjectSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     project_id: str
-    project_name: str
+    project_name: str = Field(pattern=PROJECT_NAME_PATTERN)
     status: Literal["draft", "running", "compiled", "failed"]
     scene_count: int
     created_at: datetime
@@ -62,7 +72,7 @@ class ProjectDetail(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     project_id: str
-    project_name: str
+    project_name: str = Field(pattern=PROJECT_NAME_PATTERN)
     metadata: dict[str, Any]
     scene_summaries: list[dict[str, Any]]
     video_status: Literal["none", "compiling", "ready", "failed"]

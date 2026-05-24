@@ -320,8 +320,19 @@ def build_app(
     mcp = create_mcp_server(resolved_backend, cognito)
     inner = mcp.streamable_http_app()
     routes.append(Mount("/", app=inner))
+    # KAN-97 #11 — in broker mode, the deployment's canonical external
+    # URL is the trusted source for the WWW-Authenticate metadata URL.
+    # Offline mode keeps the existing scope-derived behavior so dev /
+    # tests on ``http://testserver`` still build a usable URL.
+    canonical_base_url = cognito.public_base_url if cognito is not None else None
     return Starlette(
         routes=routes,
-        middleware=[Middleware(BearerEnforcementMiddleware, validator=_validate)],
+        middleware=[
+            Middleware(
+                BearerEnforcementMiddleware,
+                validator=_validate,
+                canonical_base_url=canonical_base_url,
+            )
+        ],
         lifespan=inner.router.lifespan_context,
     )

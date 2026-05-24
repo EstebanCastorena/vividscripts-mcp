@@ -38,6 +38,7 @@ from starlette.responses import JSONResponse
 
 from vividscripts_mcp.oauth import cognito as cognito_mod
 from vividscripts_mcp.oauth.audit import emit_audit_event
+from vividscripts_mcp.oauth.authorize import redirect_uri_matches
 from vividscripts_mcp.oauth.codes import AuthCode, AuthCodeStore
 from vividscripts_mcp.oauth.cognito import CognitoConfig
 from vividscripts_mcp.oauth.store import ClientStore
@@ -148,7 +149,11 @@ async def _handle_authorization_code(
             "invalid_grant",
             "authorization code was issued to a different client",
         )
-    if auth_code.redirect_uri != redirect_uri:
+    # Use the same loopback-port-flexible matcher as /oauth/authorize so
+    # a native client that picked a different ephemeral port between the
+    # two calls (e.g., process restart) doesn't fail RFC 8252 §7.3 —
+    # KAN-97 #13.
+    if not redirect_uri_matches(redirect_uri, [auth_code.redirect_uri]):
         return _error(
             "invalid_grant",
             "redirect_uri does not match the URI bound to this code",
