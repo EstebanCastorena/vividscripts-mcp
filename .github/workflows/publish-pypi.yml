@@ -1,0 +1,114 @@
+name: Publish to PyPI
+
+# Fires on every published GitHub release. Cut the release with::
+#
+#   gh release create v1.0.0 --notes-file CHANGELOG.md
+#
+# which triggers this workflow (event: release.published). The release
+# tag is the source of truth for the version that gets uploaded —
+# ``python -m build`` reads ``pyproject.toml`` so the tag must already
+# point at a commit where ``project.version`` matches.
+#
+# The ``workflow_dispatch`` entry exists so a maintainer can run the
+# build + sanity-check end-to-end without cutting a release. When
+# triggered manually with ``dry-run: true`` (the default), the upload
+# step is skipped — the wheel + sdist are built and attached as a
+# workflow artifact for inspection. Setting ``dry-run: false`` on a
+# manual run is **possible** but discouraged: the tag/release path is
+# the audited one.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Build but skip the PyPI upload (artifact only)"
+        type: boolean
+        default: true
+
+# OIDC trusted publishing requires id-token write at the JOB scope.
+# Everything else is least-privilege.
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build wheel + sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install build backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build wheel + sdist
+        run: python -m build
+
+      - name: Verify build artifacts
+        run: |
+          ls -la dist/
+          test -n "$(ls dist/*.whl 2>/dev/null)" || (echo "no wheel produced" && exit 1)
+          test -n "$(ls dist/*.tar.gz 2>/dev/null)" || (echo "no sdist produced" && exit 1)
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to PyPI
+    needs: [build]
+    runs-on: ubuntu-latest
+    # Skip the upload entirely for a manual dry-run. A real release
+    # (``release.published``) always uploads; ``workflow_dispatch`` only
+    # uploads if the operator explicitly set ``dry-run: false``.
+    if: |
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && inputs.dry-run == false)
+
+    # GitHub Environments gate the OIDC token: the ``pypi`` environment
+    # must be configured under Settings → Environments with PyPI as the
+    # only trusted publisher. This is what lets us upload without a
+    # long-lived API token in secrets.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/vividscripts-mcp
+
+    permissions:
+      id-token: write   # OIDC token for trusted publishing
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish via PyPA trusted publishing (OIDC)
+        # https://github.com/pypa/gh-action-pypi-publish — pinned to the
+        # ``release/v1`` floating tag the project maintains.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          # ``print-hash`` makes the upload reproducible-traceable: the
+          # workflow log shows the SHA256 that landed on PyPI, which can
+          # be cross-checked against the artifact downloaded above.
+          print-hash: true
+          # Keep the default skip-existing=false: a duplicate upload is
+          # a release-process bug worth surfacing, not silently ignoring.
