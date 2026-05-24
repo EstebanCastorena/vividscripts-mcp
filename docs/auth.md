@@ -79,11 +79,36 @@ These guarantees are enforced in code, with tests for each one. Defeating any of
 | **DCR is gated.** A prior browser session is required to register a client. The endpoint emits an audit log entry on every successful registration with the registering user, the new `client_id`, and the registered `redirect_uris`. | Validated at `/oauth/register`. | Replay attacks against the registration endpoint and silent attacker registrations. |
 | **Tokens are never logged.** The `Authorization` header is redacted at the audit boundary: log lines record the token's `jti` (when present) or the first sixteen hex characters of its SHA-256, never the raw token. | `redact_token` in [`oauth/bearer.py`](../src/vividscripts_mcp/oauth/bearer.py). | Token leakage via log aggregation, shared screens, or shoulder surfing. |
 
+## Running the offline dev server
+
+The offline mode (no Cognito configured) mounts a mock identity provider at `/_mock_idp/login` and signs its own access tokens with a process-local RSA key. That posture is appropriate for local development and the test suite, but it is not appropriate for any environment a real user can reach. Booting the offline path therefore requires an explicit opt-in. The server refuses to start otherwise:
+
+```
+InsecureStartupRefused: Refusing to start: the offline OAuth path
+(mock IdP + in-process self-mint signer) is selected (no Cognito
+configured), but the explicit opt-in env flag
+VIVIDSCRIPTS_ALLOW_OFFLINE_AUTH=1 is not set.
+```
+
+Two environment flags gate the offline path:
+
+| Variable | What it does | When to set it |
+|----------|--------------|----------------|
+| `VIVIDSCRIPTS_ALLOW_OFFLINE_AUTH=1` | Authorizes booting the offline OAuth path at all (mock IdP route + in-process self-mint RSA signer). | Local dev on `127.0.0.1`. Never set this in production. |
+| `VIVIDSCRIPTS_ALLOW_OFFLINE_NETWORK=1` | Additionally authorizes binding the offline path to a **non-loopback** host (e.g. `0.0.0.0`, a LAN IP). The flag above alone restricts offline mode to loopback. | Rarely. Only when you need a teammate on the same LAN to hit your dev server — and only ever inside a trusted network. |
+
+Both flags use strict `"1"` matching. `true`, `yes`, `on`, and uppercase variants do **not** opt in — this avoids the classic "I set it to false but you took it as truthy" footgun and gives the boot a single grep-able signature in centralized logs.
+
+When the offline path boots successfully, a `WARNING`-level log line is emitted explicitly calling out that the mock IdP is live and the in-process signer is minting tokens. A second `WARNING` fires when `VIVIDSCRIPTS_ALLOW_OFFLINE_NETWORK=1` is used, naming the non-loopback host. In CloudWatch or any structured log pipeline these warnings are the canary for an accidentally-shipped dev configuration.
+
+Configuring Cognito (via `CognitoConfig`, normally injected by the host process from Terraform-managed env vars) flips the server into broker mode and disables the offline path entirely — the env flags above are then ignored.
+
 ## Try it yourself
 
-You can drive the entire flow against a locally-running server with `curl`. Start the server:
+You can drive the entire flow against a locally-running server with `curl`. Start the server (offline mode requires the env opt-in described above):
 
 ```bash
+export VIVIDSCRIPTS_ALLOW_OFFLINE_AUTH=1
 vividscripts-mcp serve --port 8000
 ```
 

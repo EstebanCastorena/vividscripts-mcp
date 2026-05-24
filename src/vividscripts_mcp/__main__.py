@@ -71,7 +71,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         from vividscripts_mcp.server import build_app
 
+        # Build the app first so the KAN-96 startup guard fires before
+        # any --seed-session cookie is printed or any port is bound.
+        # In offline mode (no Cognito), build_app raises
+        # InsecureStartupRefused unless the operator has set
+        # VIVIDSCRIPTS_ALLOW_OFFLINE_AUTH=1 (and, for a non-loopback
+        # host, VIVIDSCRIPTS_ALLOW_OFFLINE_NETWORK=1).
         session_store = MockSessionStore()
+        app = build_app(host=args.host, session_store=session_store)
+
         if args.seed_session is not None:
             info = session_store.create(user_id=args.seed_session)
             print(
@@ -82,11 +90,7 @@ def main(argv: list[str] | None = None) -> int:
                 flush=True,
             )
 
-        uvicorn.run(
-            build_app(session_store=session_store),
-            host=args.host,
-            port=args.port,
-        )
+        uvicorn.run(app, host=args.host, port=args.port)
         return 0
 
     return 1

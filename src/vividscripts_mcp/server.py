@@ -55,6 +55,7 @@ from vividscripts_mcp.oauth.mock_idp import LOGIN_PATH as MOCK_IDP_LOGIN_PATH
 from vividscripts_mcp.oauth.mock_idp import make_login_handler
 from vividscripts_mcp.oauth.ratelimit import GlobalRateLimiter
 from vividscripts_mcp.oauth.session import MockSessionStore, SessionStore
+from vividscripts_mcp.oauth.startup_guards import ensure_offline_path_allowed
 from vividscripts_mcp.oauth.store import ClientStore, MockClientStore
 from vividscripts_mcp.oauth.token import make_token_handler
 from vividscripts_mcp.oauth.tokens import MockRefreshTokenStore, RefreshTokenStore
@@ -159,6 +160,7 @@ def build_app(
     jwks_provider: JWKSProvider | None = None,
     cognito: CognitoConfig | None = None,
     dcr_rate_limiter: GlobalRateLimiter | None = None,
+    host: str | None = None,
 ) -> Starlette:
     """Assemble the ASGI app: Starlette host + mounted FastMCP streamable HTTP.
 
@@ -183,7 +185,20 @@ def build_app(
     documents advertise the real deployment, and the offline mock IdP is
     **not** mounted. With ``cognito`` unset everything stays offline
     (mock IdP + self-mint) so the unit suite runs without a network.
+
+    Passing ``host`` engages the KAN-96 startup guard when ``cognito``
+    is unset: a non-loopback bind or a missing
+    ``VIVIDSCRIPTS_ALLOW_OFFLINE_AUTH=1`` opt-in raises
+    :class:`~vividscripts_mcp.oauth.startup_guards.InsecureStartupRefused`
+    *before* any route is mounted. ``host`` defaults to ``None`` so the
+    in-process test suite (``TestClient``, which does not bind a socket)
+    continues to work without any env-flag scaffolding — the guard's
+    threat model is the production entry point in
+    ``vividscripts_mcp/__main__.py``, where uvicorn binds for real.
     """
+    if cognito is None and host is not None:
+        ensure_offline_path_allowed(host)
+
     resolved_client_store: ClientStore = (
         client_store if client_store is not None else MockClientStore()
     )
