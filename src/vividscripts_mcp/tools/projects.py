@@ -28,6 +28,12 @@ from vividscripts_mcp.models import (
 )
 from vividscripts_mcp.oauth.context import require_user_claims
 
+# KAN-97 #10 — ``story`` was a bare ``str``: a remote caller could send
+# a gigabyte and blow up the process before any tool logic looked at it.
+# 200_000 chars is a long novel chapter — generous for real use, tight
+# enough to refuse a memory-exhaustion payload.
+_MAX_STORY_CHARS = 200_000
+
 
 def make_create_project_tool(
     backend: BackendProtocol,
@@ -46,6 +52,8 @@ def make_create_project_tool(
             Project ID: <project_id>
             Editor: <editor_url>
         """
+        if len(story) > _MAX_STORY_CHARS:
+            raise ValueError(f"story is {len(story)} chars; max is {_MAX_STORY_CHARS}")
         user_id = require_user_claims().sub
         return backend.create_project(user_id=user_id, story=story, settings=settings)
 

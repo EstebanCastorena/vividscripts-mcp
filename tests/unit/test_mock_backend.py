@@ -208,4 +208,8 @@ def test_video_download_url(
     info = backend.create_project(user_id, sample_story, settings)
     url, _expires = backend.get_video_download_url(user_id, info.project_id)
     assert url.endswith("output.mp4")
-    assert user_id in url
+    # KAN-97 #9 — the URL must not echo ``user_id`` (the OAuth ``sub``)
+    # back to the model/client. The opaque server-generated token in the
+    # path is what the redemption endpoint resolves back to the user.
+    assert user_id not in url
+    assert url.startswith("https://app.vividscripts.test/v/")

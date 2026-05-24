@@ -24,6 +24,7 @@ Security guarantees, all tested:
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from typing import Any, Protocol, runtime_checkable
 
@@ -53,6 +54,13 @@ _REQUIRED_CLAIMS = ("exp", "iat", "iss", "sub", "jti")
 #: PyJWT's iat validation disabled (``verify_iat: False``); ``exp`` stays
 #: strict.
 _IAT_LEEWAY_SECONDS = 60
+
+# KAN-97 #12 — only ``jti`` values matching this pattern are safe to emit
+# verbatim into an audit log line. Anything outside the alphabet (CRLF,
+# spaces, slashes, quotes, control chars, oversize ids) falls back to
+# the SHA-256 prefix so an attacker cannot forge log-line boundaries or
+# correlation handles from a rejected token.
+_SAFE_JTI_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class UserClaims(BaseModel):
@@ -90,17 +98,22 @@ class InProcessJWKSProvider:
         return jwk
 
 
-def redact_token(token: str, claims: dict[str, Any] | None = None) -> str:
+def redact_token(token: str, claims: UserClaims | None = None) -> str:
     """Return a non-reversible fingerprint suitable for logging.
 
-    Prefers the ``jti`` claim when available (which the validator already
-    cross-checks). Falls back to the first 16 hex chars of SHA-256(token).
-    The raw token is never returned.
+    Prefers the ``jti`` claim, but **only** when ``claims`` is a fully
+    validated :class:`UserClaims` instance — passing a raw decoded-claim
+    dict on a reject path is no longer enough to flip into the ``jti:``
+    branch. The ``jti`` is then sanitized against
+    :data:`_SAFE_JTI_PATTERN`; anything that would let an attacker forge
+    log-line boundaries or correlation handles falls back to the
+    SHA-256 prefix. The raw token is never returned. KAN-97 #12.
     """
-    if claims is not None:
-        jti = claims.get("jti")
-        if isinstance(jti, str) and jti:
-            return f"jti:{jti}"
+    # ``isinstance`` (not just ``is not None``) so a caller that passed
+    # a raw decoded-claim dict on a reject path can never reach this
+    # branch — defensive against the pre-KAN-97 signature.
+    if isinstance(claims, UserClaims) and _SAFE_JTI_PATTERN.fullmatch(claims.jti):
+        return f"jti:{claims.jti}"
     digest = hashlib.sha256(token.encode("ascii")).hexdigest()
     return f"sha256:{digest[:16]}"
 

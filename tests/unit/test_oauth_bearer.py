@@ -297,8 +297,10 @@ def test_jwks_endpoint_unauthenticated_allowed(http: TestClient) -> None:
 
 
 def test_redact_token_uses_jti_when_available() -> None:
-    redacted = redact_token("anything-here", claims={"jti": "abc-xyz"})
-    assert redacted == "jti:abc-xyz"
+    claims = UserClaims(
+        sub="user-alpha", client_id="c", scope=None, jti="abc-xyz", exp=9999999999, iat=1
+    )
+    assert redact_token("anything-here", claims=claims) == "jti:abc-xyz"
 
 
 def test_redact_token_falls_back_to_sha256_prefix() -> None:

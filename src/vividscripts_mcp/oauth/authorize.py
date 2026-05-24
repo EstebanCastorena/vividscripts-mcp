@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import secrets
 import urllib.parse
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, datetime
 
 from starlette.requests import Request
@@ -46,6 +46,49 @@ from vividscripts_mcp.oauth.store import ClientStore
 #: (no Cognito configured). The broker path redirects to Cognito Hosted
 #: UI instead; the ``request_id`` survives both as the round-trip nonce.
 MOCK_IDP_LOGIN_PATH = "/_mock_idp/login"
+
+# KAN-97 #13 — RFC 8252 §7.3 loopback hosts. Native clients (Claude Code,
+# vividscripts-mcp serve) pick ephemeral ports; the port is the only
+# attribute that varies between registration and redemption, so it must
+# not participate in the exact-match check when the host is loopback.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def redirect_uri_matches(presented: str, registered_uris: Iterable[str]) -> bool:
+    """Strict exact-match, with one exception for loopback hosts.
+
+    Per RFC 8252 §7.3, native clients listen on an ephemeral loopback
+    port and rebuild the ``redirect_uri`` at runtime. When both the
+    registered and presented URIs are loopback, the port may differ but
+    scheme, host, and path must still match exactly. For every other
+    host the comparison is unchanged — same byte string in, same byte
+    string out — preserving the AC #3 exact-match guarantee.
+    """
+    if presented in registered_uris:
+        return True
+    try:
+        presented_parts = urllib.parse.urlsplit(presented)
+    except ValueError:
+        return False
+    presented_host = presented_parts.hostname
+    if presented_host not in _LOOPBACK_HOSTS:
+        return False
+    for registered in registered_uris:
+        try:
+            registered_parts = urllib.parse.urlsplit(registered)
+        except ValueError:
+            continue
+        if registered_parts.hostname not in _LOOPBACK_HOSTS:
+            continue
+        if (
+            registered_parts.scheme == presented_parts.scheme
+            and registered_parts.hostname == presented_parts.hostname
+            and registered_parts.path == presented_parts.path
+            and registered_parts.query == presented_parts.query
+            and registered_parts.fragment == presented_parts.fragment
+        ):
+            return True
+    return False
 
 
 def _error(error: str, description: str, status_code: int = 400) -> JSONResponse:
@@ -83,8 +126,9 @@ def make_authorize_handler(
         redirect_uri = params.get("redirect_uri")
         if not redirect_uri:
             return _error("invalid_request", "redirect_uri is required")
-        # Exact match — Security AC #3.
-        if redirect_uri not in client.redirect_uris:
+        # Exact match (Security AC #3), with RFC 8252 §7.3 loopback port
+        # flexibility for native clients (KAN-97 #13).
+        if not redirect_uri_matches(redirect_uri, client.redirect_uris):
             return _error(
                 "invalid_request",
                 "redirect_uri does not match the client's registered URIs",
