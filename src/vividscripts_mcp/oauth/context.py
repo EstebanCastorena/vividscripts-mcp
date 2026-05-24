@@ -6,11 +6,15 @@ binds the resulting :class:`UserClaims` to a :mod:`contextvars`
 the request that triggered them — read the current claims via
 :func:`require_user_claims`.
 
-``contextvars`` are task-local: each ASGI request runs in its own task
-(directly or via ``asyncio.create_task``, which copies the parent
-context). So even though the var is module-level, concurrent requests
-don't see each other's claims. This is the same idiom Starlette uses
-internally for request-scoped state.
+Per-task isolation is a defense-in-depth assumption (ASGI servers
+usually allocate a fresh task per request, which copies its parent
+context), but the middleware does **not** rely on it for correctness.
+:func:`set_user_claims` returns a ``contextvars.Token`` that the
+middleware passes back to :func:`reset_user_claims` in a ``try/finally``
+around the downstream call, so the bind is unwound on every code path
+— success, early return, or downstream exception. The pair makes the
+context strictly request-scoped regardless of how the server schedules
+tasks (KAN-94, audit finding #1).
 """
 
 from __future__ import annotations
@@ -24,9 +28,21 @@ _current_claims: contextvars.ContextVar[UserClaims | None] = contextvars.Context
 )
 
 
-def set_user_claims(claims: UserClaims | None) -> None:
-    """Bind the current request's authenticated user. Middleware-internal."""
-    _current_claims.set(claims)
+def set_user_claims(claims: UserClaims | None) -> contextvars.Token[UserClaims | None]:
+    """Bind the current request's authenticated user. Middleware-internal.
+
+    Returns the ``contextvars.Token`` for the bind so the caller can pass
+    it back to :func:`reset_user_claims` (typically in a ``try/finally``).
+    Without that reset the bind persists in the caller's context and the
+    next code path that reads :func:`get_user_claims` in the same task
+    sees a stale identity (KAN-94, audit finding #1).
+    """
+    return _current_claims.set(claims)
+
+
+def reset_user_claims(token: contextvars.Token[UserClaims | None]) -> None:
+    """Restore the auth-context to its prior value. Middleware-internal."""
+    _current_claims.reset(token)
 
 
 def get_user_claims() -> UserClaims | None:
