@@ -350,6 +350,17 @@ class BearerEnforcementMiddleware:
             return
 
         headers = Headers(scope=scope)
+        # KAN-98 #22 — Starlette's ``Headers.get`` returns the first
+        # match, so duplicate ``Authorization`` headers silently collapse
+        # to whichever the inner adapter happens to expose. In any
+        # topology where an upstream and the app disagree on which
+        # header wins, the security decision diverges from what was
+        # authorized. Reject the request shape outright; we cannot
+        # safely guess which header the operator meant.
+        if len(headers.getlist("authorization")) > 1:
+            await self._reject_multiple_authorization(scope, receive, send)
+            return
+
         token = _extract_bearer(headers)
         if token is None:
             await self._unauthenticated(scope, receive, send)
@@ -395,5 +406,17 @@ class BearerEnforcementMiddleware:
         response = Response(
             status_code=401,
             headers={"WWW-Authenticate": challenge},
+        )
+        await response(scope, receive, send)
+
+    async def _reject_multiple_authorization(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        """KAN-98 #22 — explicit 400 on a multi-Authorization request shape."""
+        body = b'{"error":"invalid_request","error_description":"multiple Authorization headers"}'
+        response = Response(
+            content=body,
+            status_code=400,
+            media_type="application/json",
         )
         await response(scope, receive, send)

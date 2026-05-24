@@ -115,7 +115,18 @@ def make_login_handler(
         redirect_params: dict[str, str] = {"code": code}
         if auth_req.state is not None:
             redirect_params["state"] = auth_req.state
-        redirect_to = f"{auth_req.redirect_uri}?{urllib.parse.urlencode(redirect_params)}"
+        # KAN-98 #20 — merge with any existing query string on the
+        # registered ``redirect_uri`` instead of bare ``?{params}``
+        # concatenation. A client that registered
+        # ``http://localhost/cb?ui=v2`` would otherwise receive
+        # ``...?ui=v2?code=...`` — malformed URL, downstream parsing
+        # ambiguity on whether ``code`` belongs to the first or second
+        # query segment.
+        parsed = urllib.parse.urlparse(auth_req.redirect_uri)
+        existing = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        existing.extend(redirect_params.items())
+        merged_query = urllib.parse.urlencode(existing)
+        redirect_to = urllib.parse.urlunparse(parsed._replace(query=merged_query))
 
         response = RedirectResponse(redirect_to, status_code=302)
         # Same-site lax + httponly. Phase 1 dev server is HTTP, so we don't

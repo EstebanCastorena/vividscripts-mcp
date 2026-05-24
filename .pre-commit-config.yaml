@@ -44,3 +44,18 @@ repos:
         # Catches accidentally committed secrets before they reach the
         # remote. GitHub's native secret scanning is the backstop; this is
         # the front line.
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.10
+    hooks:
+      - id: bandit
+        # KAN-98 — static analysis for the broad ``==``-on-secret /
+        # ``subprocess shell=True`` / ``yaml.load`` class of bugs. Half
+        # of the audit's #14–#23 findings would have been auto-flagged.
+        # Configuration lives in ``bandit.yaml`` (excludes ``tests/``).
+        args: ["-c", "bandit.yaml", "-r", "src/"]
+        # pre-commit ships paths via ``files`` but bandit's recursive
+        # scan reads ``src/`` directly; stop pre-commit from also
+        # passing per-file paths (would re-scan the same files twice).
+        pass_filenames: false
+        files: ^src/
