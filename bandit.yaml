@@ -1,0 +1,28 @@
+# bandit configuration for vividscripts-mcp (KAN-98 #16-#23 sweep).
+#
+# Scope: scans only ``src/`` — production code. ``tests/`` are not
+# scanned because legitimate negative-path tests (forging tokens,
+# crafting bad URIs, calling private APIs) trip bandit's heuristics
+# without adding signal.
+#
+# Severity stance: any HIGH-severity finding blocks CI. MEDIUM is
+# blocking in the pre-commit hook but advisory in CI (the on-PR runner
+# annotates rather than fails) until the team has a written triage
+# policy. ``# nosec`` annotations must include a justification comment.
+
+exclude_dirs:
+  - tests
+  - .venv
+  - .git
+  - .mypy_cache
+  - .pytest_cache
+  - .ruff_cache
+  - build
+  - dist
+
+# B101 (assert_used) — bandit flags ``assert`` because Python's -O strips
+# them. We use assert sparingly in src/ and never as a security control;
+# disable to silence the noise. The pattern's runtime-strip risk is a
+# code-review responsibility, not a static-analysis one.
+skips:
+  - B101

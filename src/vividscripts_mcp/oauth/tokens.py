@@ -40,7 +40,12 @@ DEFAULT_AUDIENCE = "https://app.vividscripts.com/mcp"
 
 
 class RefreshTokenRecord(BaseModel):
-    """Persisted refresh token. Opaque value mapped to the user/client it grants."""
+    """Persisted refresh token. Opaque value mapped to the user/client it grants.
+
+    KAN-98 #19 — ``family_id`` groups every rotation of a single original
+    grant. Replaying a consumed token within a family revokes all live
+    members of that family (reuse detection).
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -49,6 +54,7 @@ class RefreshTokenRecord(BaseModel):
     user_id: str
     scope: str | None
     expires_at: int
+    family_id: str
 
 
 @runtime_checkable
@@ -59,22 +65,58 @@ class RefreshTokenStore(Protocol):
 
 
 class MockRefreshTokenStore:
-    """Thread-safe in-memory refresh-token persistence."""
+    """Thread-safe in-memory refresh-token persistence.
+
+    KAN-98 #19 — implements reuse detection. When :meth:`consume` is
+    called with a token that was already consumed (tombstoned), the
+    entire token family is revoked rather than silently returning
+    ``None``. The token endpoint translates a ``None`` return into
+    ``invalid_grant``; revoking the family ensures a covertly-stolen
+    token converts to a noisy boot-out as soon as either party uses it.
+    """
 
     def __init__(self) -> None:
         self._items: dict[str, RefreshTokenRecord] = {}
+        # token -> family_id mapping for previously-consumed tokens.
+        # Lookup hit here is the reuse signal that triggers family
+        # revocation.
+        self._consumed_families: dict[str, str] = {}
+        # family_id -> set of live token strings. Lets us revoke an
+        # entire family in O(family size) on reuse detection.
+        self._family_members: dict[str, set[str]] = {}
         self._lock = threading.Lock()
 
     def add(self, record: RefreshTokenRecord) -> None:
         with self._lock:
             self._items[record.refresh_token] = record
+            self._family_members.setdefault(record.family_id, set()).add(record.refresh_token)
 
     def consume(self, refresh_token: str) -> RefreshTokenRecord | None:
         with self._lock:
+            # Reuse detection: a replay of a tombstoned token burns the
+            # entire family. The token endpoint still returns
+            # ``invalid_grant``; the legitimate holder of the rotated
+            # token will hit the same dead-family path on their next
+            # refresh and be forced to re-authenticate.
+            family_id = self._consumed_families.get(refresh_token)
+            if family_id is not None:
+                for member in list(self._family_members.get(family_id, set())):
+                    self._items.pop(member, None)
+                self._family_members.pop(family_id, None)
+                return None
             entry = self._items.pop(refresh_token, None)
-        if entry is None or entry.expires_at < int(datetime.now(UTC).timestamp()):
-            return None
-        return entry
+            if entry is None:
+                return None
+            if entry.expires_at < int(datetime.now(UTC).timestamp()):
+                # Expired by clock — natural rejection, not a reuse
+                # signal. Don't tombstone (would generate a DoS on
+                # every legitimate expiry).
+                self._family_members.get(entry.family_id, set()).discard(refresh_token)
+                return None
+            # Tombstone the token so a future replay is detectable.
+            self._consumed_families[refresh_token] = entry.family_id
+            self._family_members.get(entry.family_id, set()).discard(refresh_token)
+            return entry
 
 
 def mint_access_token(
@@ -95,7 +137,7 @@ def mint_access_token(
         "client_id": client_id,
         "iat": now,
         "exp": now + ttl_seconds,
-        "token_use": "access",
+        "token_use": "access",  # nosec B105 — Cognito-shape claim discriminator, not a credential
         "jti": secrets.token_urlsafe(12),
     }
     if scope is not None:
@@ -117,8 +159,15 @@ def mint_refresh_token(
     client_id: str,
     scope: str | None = None,
     ttl_seconds: int = REFRESH_TOKEN_TTL_SECONDS,
+    family_id: str | None = None,
 ) -> tuple[str, RefreshTokenRecord]:
-    """Generate an opaque refresh token + its persistence record."""
+    """Generate an opaque refresh token + its persistence record.
+
+    ``family_id`` groups rotation chains for KAN-98 #19 reuse detection.
+    Pass the prior token's family on each rotation so the entire chain
+    is burnt if any earlier member is replayed; omit it for a brand-new
+    grant so a fresh family is allocated.
+    """
     token = secrets.token_urlsafe(32)
     now = int(datetime.now(UTC).timestamp())
     record = RefreshTokenRecord(
@@ -127,5 +176,6 @@ def mint_refresh_token(
         user_id=user_id,
         scope=scope,
         expires_at=now + ttl_seconds,
+        family_id=family_id if family_id is not None else secrets.token_urlsafe(16),
     )
     return token, record

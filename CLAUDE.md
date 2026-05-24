@@ -163,10 +163,30 @@ pytest -q                                      # all tests pass
 mypy                                            # mypy strict clean
 ruff check src/ tests/                         # lint clean
 ruff format --check src/ tests/                # format clean
+bandit -c bandit.yaml -r src/                  # static security clean (KAN-98)
 pre-commit run --all-files                     # everything together
 ```
 
 If any of those fail, the PR's CI will fail too.
+
+### Bandit (KAN-98)
+
+`bandit` runs against `src/` only (production code) and is configured in
+`bandit.yaml` at the repo root. It catches the broad category of
+`==`-on-secret, `subprocess shell=True`, `yaml.load`, etc. Half of the
+audit's #14–#23 findings would have been auto-flagged.
+
+When bandit flags a real false positive, annotate with `# nosec
+B<rule_id> — <one-line justification>`. Never blanket `# nosec` without
+a rule id or a reason.
+
+### pip-audit (advisory, KAN-98)
+
+`pip-audit` runs as a separate CI job that **does not block merges**. It
+emits CVE matches against installed deps as workflow annotations. Until
+the team writes down a triage policy (when to upgrade a transitive dep
+vs. when to file an issue), treat the output as informational. Promote
+to a blocking gate once the policy is decided.
 
 ## What's NOT in this repo (intentional)
 

@@ -38,6 +38,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+          pip install bandit
 
       - name: Lint (ruff)
         run: ruff check .
@@ -48,5 +49,39 @@ jobs:
       - name: Type check (mypy)
         run: mypy --strict src/vividscripts_mcp
 
+      # KAN-98 — static security analysis. HIGH-severity findings block
+      # the build; the ``bandit.yaml`` config narrows the scope to
+      # ``src/`` and skips noisy rules (see file for the policy).
+      - name: Static security (bandit)
+        run: bandit -c bandit.yaml -r src/
+
       - name: Test (pytest)
         run: pytest --cov=vividscripts_mcp --cov-report=term-missing
+
+  # KAN-98 — pip-audit runs as its own non-blocking job so a transient
+  # CVE in a transitive dep does not red-light an unrelated PR. The
+  # advisory output is captured as a workflow annotation; the triage
+  # policy (when to upgrade vs. when to file an issue) is documented in
+  # ``CLAUDE.md`` under "Quality gates". Promote this to a blocking gate
+  # once the policy is settled.
+  pip-audit:
+    name: Dependency audit (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pip-audit
+
+      - name: Audit installed dependencies
+        run: pip-audit --strict || true

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -60,12 +61,18 @@ def _verify_pkce(code_verifier: str, code_challenge: str, method: str) -> bool:
     """RFC 7636 § 4.6: base64url(sha256(verifier)) == stored challenge.
 
     Only S256 is implemented; ``plain`` was rejected at /oauth/authorize.
+
+    KAN-98 #14 — the equality check uses :func:`hmac.compare_digest` so
+    it runs in constant time. Largely theoretical against PKCE (SHA-256
+    preimage resistance) but it is the project's idiom for any
+    secret-equal-secret comparison; new code under ``oauth/`` should
+    follow this pattern.
     """
     if method != "S256":
         return False
     digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
     computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    return computed == code_challenge
+    return hmac.compare_digest(computed, code_challenge)
 
 
 def make_token_handler(
@@ -106,7 +113,7 @@ def _passthrough_body(auth_code: AuthCode) -> JSONResponse:
     """Return the Cognito tokens bound to this one-shot code (KAN-36)."""
     body: dict[str, Any] = {
         "access_token": auth_code.cognito_access_token,
-        "token_type": "Bearer",
+        "token_type": "Bearer",  # nosec B105 — RFC 6750 § 4 protocol literal, not a credential
         "expires_in": auth_code.cognito_expires_in,
     }
     if auth_code.cognito_refresh_token is not None:
@@ -135,7 +142,12 @@ async def _handle_authorization_code(
         )
 
     if client_store.get(client_id) is None:
-        return _error("invalid_client", "unknown client_id")
+        # KAN-98 #23 — collapse the ``invalid_client`` / ``invalid_grant``
+        # differential at the token endpoint. The split was an enumeration
+        # oracle for registered ``client_id`` values; ``client_id`` is not
+        # a secret per RFC 6749 § 2.2 (negligible practical impact), but
+        # the differential is also free to remove.
+        return _error("invalid_grant", "client, code, or grant is invalid")
 
     auth_code = code_store.consume(code)
     if auth_code is None:
@@ -204,7 +216,7 @@ async def _handle_authorization_code(
 
     body: dict[str, Any] = {
         "access_token": access_token,
-        "token_type": "Bearer",
+        "token_type": "Bearer",  # nosec B105 — RFC 6750 § 4 protocol literal, not a credential
         "expires_in": expires_in,
         "refresh_token": refresh_token,
     }
@@ -240,7 +252,7 @@ async def _handle_refresh_token(
         )
         refreshed: dict[str, Any] = {
             "access_token": tokens.access_token,
-            "token_type": "Bearer",
+            "token_type": "Bearer",  # nosec B105 — RFC 6750 § 4 protocol literal, not a credential
             "expires_in": tokens.expires_in,
             "refresh_token": tokens.refresh_token or presented,
         }
@@ -258,10 +270,14 @@ async def _handle_refresh_token(
         client_id=record.client_id,
         scope=record.scope,
     )
+    # KAN-98 #19 — pass the consumed token's family forward so the
+    # rotated token is part of the same reuse-detection family. A
+    # later replay of any earlier member burns this rotation too.
     new_refresh, new_record = mint_refresh_token(
         user_id=record.user_id,
         client_id=record.client_id,
         scope=record.scope,
+        family_id=record.family_id,
     )
     refresh_token_store.add(new_record)
 
@@ -274,7 +290,7 @@ async def _handle_refresh_token(
 
     body: dict[str, Any] = {
         "access_token": access_token,
-        "token_type": "Bearer",
+        "token_type": "Bearer",  # nosec B105 — RFC 6750 § 4 protocol literal, not a credential
         "expires_in": expires_in,
         "refresh_token": new_refresh,
     }

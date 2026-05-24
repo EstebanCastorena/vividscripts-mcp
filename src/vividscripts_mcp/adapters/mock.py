@@ -181,7 +181,12 @@ class MockBackend:
     def _require(self, user_id: str, project_id: str) -> _ProjectState:
         state = self._projects.get((user_id, project_id))
         if state is None:
-            msg = f"project {project_id!r} not found for user {user_id!r}"
+            # KAN-98 #18 — do not echo the caller's own ``user_id``
+            # (OAuth ``sub``) into the wire / model-visible error string.
+            # Existence vs. ownership are correctly indistinguishable
+            # since both code paths land here; the ``sub`` echo was a
+            # gratuitous PII leak.
+            msg = f"project {project_id!r} not found"
             raise KeyError(msg)
         return state
 

@@ -29,7 +29,7 @@ import time
 from typing import Any, Protocol, runtime_checkable
 
 import jwt
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -62,6 +62,22 @@ _IAT_LEEWAY_SECONDS = 60
 # correlation handles from a rejected token.
 _SAFE_JTI_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
+#: KAN-98 #21 — known scope values for the protected-resource. ``scope`` is
+#: passed verbatim from the access token into :class:`UserClaims`; bounding
+#: the alphabet here keeps an upstream-bug-induced unknown scope from
+#: silently flowing into any future scope-based authz check.
+_ALLOWED_SCOPES: frozenset[str] = frozenset(
+    {
+        "openid",
+        "profile",
+        "email",
+        # Cognito's app-client surface adds this one in real deployments.
+        # Bounding the allow-list to known values is the goal; allowing the
+        # one Cognito scope we actually request keeps the broker path live.
+        "aws.cognito.signin.user.admin",
+    }
+)
+
 
 class UserClaims(BaseModel):
     """The subset of JWT claims the MCP tool layer relies on."""
@@ -74,6 +90,28 @@ class UserClaims(BaseModel):
     jti: str
     exp: int
     iat: int
+
+    @field_validator("scope")
+    @classmethod
+    def _validate_scope(cls, value: str | None) -> str | None:
+        """KAN-98 #21 — allow-list known OAuth scope values.
+
+        ``scope`` arrives space-delimited (RFC 6749 § 3.3). An empty
+        string is treated as ``None`` (Cognito sometimes omits the
+        claim, sometimes sends an empty string); any token not in
+        :data:`_ALLOWED_SCOPES` raises ``ValueError``, which the
+        validator's caller translates into a ``None`` rejection on the
+        Bearer path. Informational today (tools only read ``.sub``);
+        prevents drift before Phase-3 adds scope-based authz.
+        """
+        if value is None or value == "":
+            return None
+        tokens = value.split()
+        unknown = [t for t in tokens if t not in _ALLOWED_SCOPES]
+        if unknown:
+            msg = f"unknown scope values: {unknown!r}"
+            raise ValueError(msg)
+        return value
 
 
 @runtime_checkable
@@ -114,8 +152,12 @@ def redact_token(token: str, claims: UserClaims | None = None) -> str:
     # branch — defensive against the pre-KAN-97 signature.
     if isinstance(claims, UserClaims) and _SAFE_JTI_PATTERN.fullmatch(claims.jti):
         return f"jti:{claims.jti}"
+    # KAN-98 #17 — emit the full SHA-256 digest rather than a 64-bit
+    # truncation. 64 bits is plenty for preimage resistance but invites
+    # cross-log correlation forgery; the full digest closes that gap and
+    # the byte cost is negligible.
     digest = hashlib.sha256(token.encode("ascii")).hexdigest()
-    return f"sha256:{digest[:16]}"
+    return f"sha256:{digest}"
 
 
 def validate_bearer_token(
