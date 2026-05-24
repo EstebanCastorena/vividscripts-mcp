@@ -24,6 +24,7 @@ Security guarantees, all tested:
 from __future__ import annotations
 
 import hashlib
+import time
 from typing import Any, Protocol, runtime_checkable
 
 import jwt
@@ -36,6 +37,22 @@ from vividscripts_mcp.oauth.tokens import DEFAULT_AUDIENCE, DEFAULT_ISSUER
 
 #: Path the JWKS document is served from. Standard well-known suffix.
 JWKS_PATH = "/.well-known/jwks.json"
+
+#: KAN-95 finding #3 — standard claims required at the decode layer (not
+#: incidentally via :class:`UserClaims`'s required Pydantic fields). A
+#: refactor of :class:`UserClaims` therefore cannot silently disable
+#: required-claim enforcement.
+_REQUIRED_CLAIMS = ("exp", "iat", "iss", "sub", "jti")
+
+#: KAN-95 finding #3 — clock-skew tolerance for ``iat`` only.
+#: PyJWT 2.x with ``leeway=0`` raises :class:`jwt.ImmatureSignatureError` for
+#: any future-dated ``iat``; 60s absorbs ordinary client/server clock drift.
+#: We deliberately do *not* pass this as PyJWT's ``leeway=`` kwarg because
+#: that would also extend ``exp`` tolerance — accepting tokens that have
+#: been expired for up to 60s. ``iat`` is checked manually post-decode with
+#: PyJWT's iat validation disabled (``verify_iat: False``); ``exp`` stays
+#: strict.
+_IAT_LEEWAY_SECONDS = 60
 
 
 class UserClaims(BaseModel):
@@ -139,20 +156,54 @@ def validate_bearer_token(
     except jwt.PyJWKError:
         return None
 
+    # KAN-95 finding #4 — bind the resolved JWK to RSA / signature use / the
+    # pinned algorithm before trusting its signature. The ``algorithms=[…]``
+    # pin alone is insufficient defense once the Phase-3 HTTP JWKS provider
+    # can return a multi-key or non-RSA set (key-confusion). ``alg`` and
+    # ``use`` are optional per RFC 7517, so absent metadata defaults to the
+    # expected value rather than rejecting.
+    if jwk.get("kty") != "RSA":
+        return None
+    if jwk.get("use", "sig") != "sig":
+        return None
+    if jwk.get("alg", ALGORITHM) != ALGORITHM:
+        return None
+
+    # KAN-95 finding #3 — enforce a complete claim policy at the decode
+    # layer. ``require`` rejects tokens missing standard claims so expiry
+    # / required-claim enforcement no longer rides on :class:`UserClaims`'s
+    # required Pydantic fields. ``verify_iat: False`` disables PyJWT's
+    # strict iat check (we re-check it below with a small leeway so
+    # ``exp`` tolerance is not accidentally extended too).
+    options: dict[str, Any] = {
+        "require": list(_REQUIRED_CLAIMS),
+        "verify_signature": True,
+        "verify_iat": False,
+    }
     decode_kwargs: dict[str, Any] = {
         "algorithms": [ALGORITHM],  # Explicit — RS256 only, no fallback.
         "issuer": issuer,
+        "options": options,
     }
     if audience is not None:
         decode_kwargs["audience"] = audience
     else:
         # Cognito access tokens have no ``aud``; identity is enforced
         # below against ``client_id`` instead.
-        decode_kwargs["options"] = {"verify_aud": False}
+        options["verify_aud"] = False
 
     try:
         claims = jwt.decode(token, key=key, **decode_kwargs)
     except jwt.InvalidTokenError:
+        return None
+
+    # KAN-95 finding #3 — manual iat skew check (PyJWT's verify_iat is
+    # disabled above so ``leeway`` does not also weaken ``exp``).
+    try:
+        iat_value = int(claims["iat"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if iat_value > int(time.time()) + _IAT_LEEWAY_SECONDS:
         return None
 
     if claims.get("token_use") != "access":
