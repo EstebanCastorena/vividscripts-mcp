@@ -168,9 +168,67 @@ def make_as_metadata_handler(
     return handler
 
 
-def _is_mcp_path(path: str) -> bool:
-    """The Streamable HTTP transport mounts at ``/mcp`` (with optional subpaths)."""
-    return path == "/mcp" or path.startswith("/mcp/")
+#: Paths that serve unauthenticated traffic. Everything **not** in this
+#: allow-list is gated by :class:`BearerEnforcementMiddleware` — see
+#: :func:`_is_public_path` for the matching rules (KAN-94, audit
+#: finding #2 — invert from default-allow to default-deny).
+#:
+#: ``/.well-known/*`` covers RFC-9728 protected-resource metadata, the
+#: RFC-8414 authorization-server metadata, and the JWKS document.
+#: ``/oauth/*`` covers DCR (own session-cookie gate), authorize, token,
+#: and the broker-mode callback. ``/_mock_idp/*`` is only mounted in
+#: offline mode and is the dev login kickoff. ``/health`` is the
+#: liveness probe.
+#:
+#: Anything else (the inner ``Mount("/")``-served FastMCP transport and
+#: any future routes it grows) requires a validated Bearer.
+_PUBLIC_EXACT_PATHS: frozenset[str] = frozenset({"/health"})
+_PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
+    "/.well-known/",
+    "/oauth/",
+    "/_mock_idp/",
+)
+
+#: Sentinel returned by :func:`_normalize_path` when a request contains
+#: ``..`` segments. The string deliberately is *not* a routable path so
+#: every allow-list check against it falls through to default-deny.
+_DENY_SENTINEL = "/__deny__"
+
+
+def _normalize_path(path: str) -> str:
+    """Canonicalize an ASGI path for allow-list matching.
+
+    * Case-fold to lowercase so ``/MCP`` cannot bypass a lowercase gate.
+    * Collapse empty (``//``) and single-dot (``.``) segments.
+    * Reject ``..`` segments by returning :data:`_DENY_SENTINEL`. We do
+      not resolve them: ``/mcp/../health`` would otherwise normalize to
+      ``/health`` (an allow-listed path) and yield a traversal bypass.
+
+    The function operates on the post-ASGI-decode path (the ASGI spec
+    decodes percent-escapes before the application sees the scope) so
+    ``/mcp%2F...`` is already ``/mcp/...`` by the time we see it; the
+    same normalization still applies.
+    """
+    segments: list[str] = []
+    for raw in path.split("/"):
+        if raw == "" or raw == ".":
+            continue
+        if raw == "..":
+            return _DENY_SENTINEL
+        segments.append(raw.lower())
+    if not segments:
+        return "/"
+    return "/" + "/".join(segments)
+
+
+def _is_public_path(path: str) -> bool:
+    """Return ``True`` iff ``path`` is on the unauthenticated allow-list."""
+    norm = _normalize_path(path)
+    if norm == _DENY_SENTINEL:
+        return False
+    if norm in _PUBLIC_EXACT_PATHS:
+        return True
+    return any(norm.startswith(prefix) for prefix in _PUBLIC_PATH_PREFIXES)
 
 
 def _has_bearer(headers: Headers) -> bool:
@@ -220,9 +278,18 @@ BearerValidator = Callable[[str], Any | None]
 
 
 class BearerEnforcementMiddleware:
-    """Reject unauthenticated or invalid ``/mcp`` requests with 401 + WWW-Authenticate.
+    """Default-deny Bearer gate for the MCP server (KAN-94, audit findings #1 + #2).
 
-    The middleware enforces two layers on /mcp:
+    Posture is **default-deny**: every HTTP request is gated unless its
+    path is on the explicit allow-list (:data:`_PUBLIC_EXACT_PATHS` /
+    :data:`_PUBLIC_PATH_PREFIXES`). The previous gate matched only
+    ``/mcp`` and ``/mcp/...`` and let everything else through, so
+    ``/MCP``, dot-segments, or any future route the inner FastMCP app
+    grows (legacy ``/sse``/``/messages`` transports, etc.) bypassed
+    auth entirely. Default-deny + path normalization closes that whole
+    class of bypass.
+
+    Two enforcement layers run on every gated path:
 
     1. **Presence.** Any request without ``Authorization: Bearer <...>``
        earns a 401 whose ``WWW-Authenticate`` header points clients at
@@ -233,9 +300,19 @@ class BearerEnforcementMiddleware:
        401 with ``error="invalid_token"`` in the ``WWW-Authenticate``
        header per RFC 6750 § 3.1.
 
-    Validated user claims are stashed on the ASGI scope under
-    ``scope["state"]["bearer_claims"]`` so downstream tool handlers can
-    read the authenticated user without re-validating.
+    Validated user claims are bound to the auth-context ``ContextVar``
+    so MCP tool handlers can read the authenticated user via
+    :func:`vividscripts_mcp.oauth.context.require_user_claims`. The
+    ``contextvars.Token`` is captured before the downstream call and
+    reset in a ``try/finally`` so the bind is unwound on **every** code
+    path — success, early return, or downstream exception. Without the
+    reset the bind persists in the caller's context and a stale
+    identity leaks into the next code path that reads it (audit
+    finding #1).
+
+    Claims are also stashed on the ASGI scope under
+    ``scope["state"]["bearer_claims"]`` for any middleware/handler that
+    prefers the scope contract over the contextvar.
     """
 
     def __init__(
@@ -252,7 +329,7 @@ class BearerEnforcementMiddleware:
             return
 
         path = scope.get("path", "")
-        if not _is_mcp_path(path):
+        if _is_public_path(path):
             await self.app(scope, receive, send)
             return
 
@@ -262,6 +339,7 @@ class BearerEnforcementMiddleware:
             await self._unauthenticated(scope, receive, send)
             return
 
+        claims: Any = None
         if self.validator is not None:
             claims = self.validator(token)
             if claims is None:
@@ -273,16 +351,20 @@ class BearerEnforcementMiddleware:
             state = scope.setdefault("state", {})
             if isinstance(state, dict):
                 state["bearer_claims"] = claims
-            # Bind the contextvar so MCP tool handlers can read the user
-            # without plumbing the ASGI scope through FastMCP internals.
-            # Late import: oauth.context depends on oauth.bearer.UserClaims;
-            # a top-level import here would force every metadata.py consumer
-            # to drag in the JWT machinery.
-            from vividscripts_mcp.oauth.context import set_user_claims
 
-            set_user_claims(claims)
+        # Bind the contextvar (when we have validated claims) and ensure
+        # it is reset on **every** exit path — including downstream
+        # exceptions. Late import: oauth.context depends on
+        # oauth.bearer.UserClaims; a top-level import here would force
+        # every metadata.py consumer to drag in the JWT machinery.
+        from vividscripts_mcp.oauth.context import reset_user_claims, set_user_claims
 
-        await self.app(scope, receive, send)
+        token_handle = set_user_claims(claims) if claims is not None else None
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            if token_handle is not None:
+                reset_user_claims(token_handle)
 
     async def _unauthenticated(
         self,
