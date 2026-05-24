@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] — Unreleased
+## [1.0.0] — 2026-05-24
 
 > **v1.0 is the first portfolio-ready release of `vividscripts-mcp`.** Phases 0–5 of the integration are shipped, the package surfaces 27 Tools + 20 Prompts over a Cognito-brokered OAuth 2.1 endpoint, and a 565-test suite — including a 232-test security regression block — gates every commit. The repository is intended to be read top-to-bottom by a reviewer; the [README](README.md), [`docs/architecture.md`](docs/architecture.md), and [`docs/tools.md`](docs/tools.md) are the entry points.
 

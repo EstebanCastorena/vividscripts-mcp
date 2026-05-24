@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vividscripts-mcp"
-version = "0.1.0a0"
+version = "1.0.0"
 description = "Remote MCP server for VividScripts — control story-to-video generation from Claude Code."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["mcp", "model-context-protocol", "claude", "vividscripts", "oauth"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
