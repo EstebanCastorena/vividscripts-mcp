@@ -138,30 +138,16 @@ def make_generate_thumbnail_tool(
     return generate_thumbnail
 
 
-def make_animate_scene_tool(
-    backend: BackendProtocol,
-) -> Callable[[str], JobSubmission]:
-    """Build the ``animate_scene`` tool bound to ``backend`` (KAN-72)."""
-
-    def animate_scene(project_id: str) -> JobSubmission:
-        """Start image-to-video animation of the project's intro scenes.
-
-        Async — returns a ``job_id`` immediately; poll ``check_job``.
-        Requires generated images first.
-
-        Present as one line:
-        ``Animation job started: <job_id> — poll check_job for progress.``
-        """
-        user_id = require_user_claims().sub
-        job_id = backend.submit_job(
-            user_id=user_id,
-            project_id=project_id,
-            job_type="animate_scene",
-            params={},
-        )
-        return JobSubmission(job_id=job_id, job_type="animate_scene")
-
-    return animate_scene
+# NOTE (post-mortem 2026-05-25, Test 2): the ``animate_scene`` tool used to
+# live here. It dispatched Kling image-to-video animation as part of the MCP
+# tool surface, but Kling is the cost-dominant step in the pipeline (per-
+# second video-model pricing) and shouldn't be invokable by a Claude-driven
+# end-to-end run by accident. The web UI's animation button still works —
+# only the MCP-driven entrypoint is removed. The underlying backend
+# capability (``submit_job(job_type="animate_scene", ...)``) is intentionally
+# preserved so the web app and CLI tooling can keep using it; re-exposing it
+# here is a one-line revert (re-add the factory + register it below).
+# See [[Projects/VividScripts/Post-Mortems/2026-05-25 MCP Story-to-Video Test 2]].
 
 
 def make_generate_music_tool(
@@ -315,7 +301,7 @@ def register_media_tools(mcp: FastMCP, backend: BackendProtocol) -> None:
     mcp.tool()(make_generate_images_tool(backend))
     mcp.tool()(make_generate_sfx_tool(backend))
     mcp.tool()(make_generate_thumbnail_tool(backend))
-    mcp.tool()(make_animate_scene_tool(backend))
+    # animate_scene intentionally NOT registered — see note above.
     mcp.tool()(make_generate_music_tool(backend))
     mcp.tool()(make_compile_video_tool(backend))
     mcp.tool()(make_select_music_tool(backend))

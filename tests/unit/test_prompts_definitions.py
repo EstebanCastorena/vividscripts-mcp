@@ -11,8 +11,10 @@ from pydantic import ValidationError
 
 from vividscripts_mcp.prompts import PROMPT_INTERFACES, PromptInterface
 
-# The canonical 20 — Phase 2 scope locked 2026-05-14, including the
+# The canonical 19 — Phase 2 scope locked 2026-05-14, including the
 # thumbnail_format_selector addition from slide_editor commit 8ae047d.
+# Dropped 2026-05-25: motion_direction (Kling animation routed out of the
+# default MCP pipeline; see Test 2 post-mortem in Obsidian).
 EXPECTED_NAMES = frozenset(
     {
         "story_blueprint",
@@ -32,7 +34,6 @@ EXPECTED_NAMES = frozenset(
         "thumbnail",
         "thumbnail_text",
         "thumbnail_format_selector",
-        "motion_direction",
         "story_optimization",
         "image_prompt_edit",
     }
@@ -44,9 +45,11 @@ EXPECTED_NAMES = frozenset(
 # ---------------------------------------------------------------------------
 
 
-def test_exactly_20_interfaces() -> None:
-    """The Phase 2 scope is exactly 20 prompts — neither more nor less."""
-    assert len(PROMPT_INTERFACES) == 20
+def test_exactly_19_interfaces() -> None:
+    """The Phase 2 scope is exactly 19 prompts after the 2026-05-25 drop of
+    motion_direction (see [[Projects/VividScripts/Post-Mortems/2026-05-25
+    MCP Story-to-Video Test 2]]). Neither more nor less."""
+    assert len(PROMPT_INTERFACES) == 19
 
 
 def test_keys_match_names() -> None:

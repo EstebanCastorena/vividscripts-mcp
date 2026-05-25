@@ -12,7 +12,6 @@ from vividscripts_mcp.oauth.bearer import UserClaims
 from vividscripts_mcp.oauth.context import AuthRequired, set_user_claims
 from vividscripts_mcp.tools.media import (
     JobSubmission,
-    make_animate_scene_tool,
     make_check_job_tool,
     make_compile_video_tool,
     make_generate_audio_tool,
@@ -25,12 +24,15 @@ from vividscripts_mcp.tools.media import (
     make_select_music_tool,
 )
 
+# animate_scene factory dropped 2026-05-25 (Test 2 post-mortem): the MCP tool
+# no longer exposes the Kling animation entrypoint to keep cost off the
+# default routine. The backend still supports the job; the web UI still calls
+# it. See tools/media.py for the matching catalog change.
 _GENERATE_FACTORIES = [
     (make_generate_audio_tool, "generate_audio"),
     (make_generate_images_tool, "generate_images"),
     (make_generate_sfx_tool, "generate_sfx"),
     (make_generate_thumbnail_tool, "generate_thumbnail"),
-    (make_animate_scene_tool, "animate_scene"),
     (make_generate_music_tool, "generate_music"),
     (make_compile_video_tool, "compile_video"),
 ]

@@ -420,28 +420,14 @@ PROMPT_INTERFACES: dict[str, PromptInterface] = {
         loops_over=None,
         depends_on=("story_blueprint", "title_generator"),
     ),
-    "motion_direction": PromptInterface(
-        name="motion_direction",
-        description=(
-            "Animation director writing concise camera/motion instructions "
-            "for a Kling-style video model that will animate a still image "
-            "from the storyboard. Takes the visual subject, action, tone, "
-            "and shot type. Loops over each scene that gets animated."
-        ),
-        input_schema=_schema(
-            {
-                "narration": _str("Narration text for the scene."),
-                "setting": _str("Scene setting."),
-                "shot_type": _str("Shot type (close-up, wide, etc.)."),
-                "tone": _str("Scene tone."),
-                "visual_action": _str("Visual action described in the image."),
-                "visual_subject": _str("Visual subject of the image."),
-            }
-        ),
-        output_schema_ref="motion_direction.json",
-        loops_over="scene",
-        depends_on=("image_director_first",),
-    ),
+    # motion_direction removed 2026-05-25 (Test 2 post-mortem): it writes
+    # camera/motion prompts for the Kling animation step, which is no longer
+    # part of the default MCP routine because of its cost. The corresponding
+    # ``animate_scene`` MCP tool is also de-registered (see tools/media.py).
+    # The schema + fixture were deleted with this change. To re-enable the
+    # Kling path, restore this PromptInterface, restore the fixture and
+    # output schema, and re-register ``make_animate_scene_tool`` in
+    # ``tools/media.py::register_media_tools``.
     "story_optimization": PromptInterface(
         name="story_optimization",
         description=(
