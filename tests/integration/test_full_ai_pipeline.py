@@ -40,9 +40,10 @@ from vividscripts_mcp.server import create_mcp_server
 
 _FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "step_results"
 
-# The two user-initiated tabs are not part of the linear story→video
-# pipeline (their descriptions say so). Everything else is in-pipeline.
-_OUT_OF_PIPELINE = {"story_optimization", "image_prompt_edit"}
+# The two user-initiated tabs + the KAN-127 documentation prompts are
+# not part of the linear story→video pipeline (their descriptions say
+# so). Everything else is in-pipeline.
+_OUT_OF_PIPELINE = {"story_optimization", "image_prompt_edit", "resume_project"}
 
 # A representative multi-paragraph horror story. MockBackend is
 # content-agnostic (it returns stub prompt bodies), so the exact prose

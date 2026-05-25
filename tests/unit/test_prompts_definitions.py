@@ -1,4 +1,4 @@
-"""Tests for the 20 PromptInterface declarations (KAN-56)."""
+"""Tests for the PromptInterface catalog (KAN-56, KAN-127)."""
 
 from __future__ import annotations
 
@@ -11,10 +11,14 @@ from pydantic import ValidationError
 
 from vividscripts_mcp.prompts import PROMPT_INTERFACES, PromptInterface
 
-# The canonical 19 — Phase 2 scope locked 2026-05-14, including the
-# thumbnail_format_selector addition from slide_editor commit 8ae047d.
-# Dropped 2026-05-25: motion_direction (Kling animation routed out of the
-# default MCP pipeline; see Test 2 post-mortem in Obsidian).
+# Catalog history:
+#   * Phase 2 (2026-05-14) — 20 prompts locked, including the
+#     thumbnail_format_selector addition from slide_editor commit 8ae047d.
+#   * 2026-05-25 (Test 2 post-mortem) — motion_direction dropped (Kling
+#     animation routed out of the default MCP pipeline). Count: 19.
+#   * KAN-127 (2026-05-25) — resume_project added as the first
+#     *documentation* prompt: a public runbook for resuming a project
+#     after a dropped MCP session. Count: 20.
 EXPECTED_NAMES = frozenset(
     {
         "story_blueprint",
@@ -36,8 +40,15 @@ EXPECTED_NAMES = frozenset(
         "thumbnail_format_selector",
         "story_optimization",
         "image_prompt_edit",
+        "resume_project",
     }
 )
+
+# Documentation prompts (KAN-127) ship a verbatim ``body`` and skip the
+# backend ``format_prompt`` round-trip + the ``save_step_result``
+# suffix. Catalog invariants that don't make sense for self-contained
+# runbooks (e.g. "has at least one *required* input field") skip these.
+DOCUMENTATION_PROMPTS = frozenset({"resume_project"})
 
 
 # ---------------------------------------------------------------------------
@@ -45,11 +56,12 @@ EXPECTED_NAMES = frozenset(
 # ---------------------------------------------------------------------------
 
 
-def test_exactly_19_interfaces() -> None:
-    """The Phase 2 scope is exactly 19 prompts after the 2026-05-25 drop of
-    motion_direction (see [[Projects/VividScripts/Post-Mortems/2026-05-25
-    MCP Story-to-Video Test 2]]). Neither more nor less."""
-    assert len(PROMPT_INTERFACES) == 19
+def test_exactly_20_interfaces() -> None:
+    """20 prompts: 19 templated (Phase 2 minus motion_direction, dropped
+    2026-05-25; see [[Projects/VividScripts/Post-Mortems/2026-05-25 MCP
+    Story-to-Video Test 2]]) + 1 documentation prompt added by KAN-127
+    (resume_project)."""
+    assert len(PROMPT_INTERFACES) == 20
 
 
 def test_keys_match_names() -> None:
@@ -211,12 +223,14 @@ def test_depends_on_graph_is_acyclic() -> None:
 
 def test_root_prompts_match_expectations() -> None:
     """Sanity check: the only prompts without dependencies are the pipeline
-    head (story_blueprint) and the two user-initiated tabs."""
+    head (story_blueprint), the two user-initiated tabs, and any
+    documentation prompts (which are by definition pipeline-independent)."""
     roots = {name for name, i in PROMPT_INTERFACES.items() if not i.depends_on}
     assert roots == {
         "story_blueprint",
         "story_optimization",
         "image_prompt_edit",
+        "resume_project",
     }, f"unexpected root prompts: {roots}"
 
 
@@ -244,3 +258,50 @@ def test_extra_fields_forbidden() -> None:
             depends_on=(),
             spurious_field="oops",  # type: ignore[call-arg]
         )
+
+
+# ---------------------------------------------------------------------------
+# Documentation prompts (KAN-127)
+# ---------------------------------------------------------------------------
+
+
+def test_documentation_prompts_have_inline_body() -> None:
+    """Every documentation prompt ships a public runbook body inline."""
+    for name in DOCUMENTATION_PROMPTS:
+        interface = PROMPT_INTERFACES[name]
+        assert interface.body is not None, f"{name}: documentation prompt must define a body"
+        # Substantive — at least a few paragraphs.
+        assert len(interface.body) >= 300, (
+            f"{name}: documentation body too short ({len(interface.body)} chars)"
+        )
+
+
+def test_template_prompts_have_no_inline_body() -> None:
+    """Template prompts must NOT carry a public body — bodies are creative IP."""
+    for name, interface in PROMPT_INTERFACES.items():
+        if name in DOCUMENTATION_PROMPTS:
+            continue
+        assert interface.body is None, (
+            f"{name}: template prompt must not ship an inline body "
+            f"(creative IP stays in slide_editor)"
+        )
+
+
+def test_resume_project_body_covers_runbook_steps() -> None:
+    """resume_project's body must walk through the documented 5 steps."""
+    body = PROMPT_INTERFACES["resume_project"].body
+    assert body is not None
+    # Step landmarks — the runbook structure is intentionally stable.
+    assert "list_projects" in body
+    assert "get_workflow_state" in body
+    assert "check_job" in body
+    # Each of the resumable media tools appears by name.
+    for tool in (
+        "generate_audio",
+        "generate_images",
+        "generate_sfx",
+        "generate_music",
+        "generate_thumbnail",
+        "compile_video",
+    ):
+        assert tool in body, f"resume_project body must mention {tool}"

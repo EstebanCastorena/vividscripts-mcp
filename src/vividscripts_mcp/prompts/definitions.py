@@ -1,11 +1,13 @@
-"""The 20 :class:`PromptInterface` declarations (KAN-56).
+"""The :class:`PromptInterface` declarations (KAN-56).
 
 Each entry describes one MCP Prompt: name, agent-role description,
 JSON-Schema for the context dict the backend will format the body with,
 a reference to the output schema (file in ``schemas/``) that
 ``save_step_result`` validates against, the loop unit (``story`` /
-``paragraph`` / ``scene`` / ``segment`` / ``None``), and the prior
-prompts whose outputs must already exist.
+``paragraph`` / ``scene`` / ``segment`` / ``None``), the prior prompts
+whose outputs must already exist, and (for documentation-only prompts)
+an optional inline ``body`` rendered verbatim instead of going through
+the backend.
 
 Source-of-truth maps to ``slide_editor/workflow/prompts/__init__.py``
 for 17 in-pipeline + 1 inline (short_title_generator) + 2 out-of-pipeline
@@ -13,6 +15,13 @@ for 17 in-pipeline + 1 inline (short_title_generator) + 2 out-of-pipeline
 
 These descriptions intentionally stay at the "what does this agent do"
 level — the templates themselves never appear in this repo.
+
+Documentation prompts (KAN-127): a small number of prompts ship public
+*how-to* bodies rather than backend-rendered templates. They expose the
+same MCP Prompt surface but skip the ``backend.format_prompt`` call and
+the trailing ``save_step_result`` instructions, since they are
+self-contained runbooks Claude follows directly. ``resume_project`` is
+the first one.
 """
 
 from __future__ import annotations
@@ -43,6 +52,13 @@ class PromptInterface(BaseModel):
     output_schema_ref: str
     loops_over: LoopUnit | None
     depends_on: tuple[str, ...]
+    #: When set, the prompt body is rendered verbatim from this string
+    #: instead of being fetched via ``backend.format_prompt``. Reserved
+    #: for *documentation* prompts (KAN-127) — public runbooks Claude
+    #: follows directly, with no creative-IP concern around the body.
+    #: The trailing ``save_step_result`` reminder is also suppressed
+    #: when this is set.
+    body: str | None = None
 
 
 def _schema(
@@ -466,5 +482,108 @@ PROMPT_INTERFACES: dict[str, PromptInterface] = {
         output_schema_ref="image_prompt_edit.json",
         loops_over=None,
         depends_on=(),
+    ),
+    # ---- documentation prompts (KAN-127) ------------------------------
+    # Public runbooks for operational gotchas. The body is rendered
+    # verbatim — no backend.format_prompt round-trip, no save_step_result
+    # suffix. Schema + fixture exist to keep catalog-alignment tests
+    # happy; in practice nothing calls ``save_step_result`` for these.
+    "resume_project": PromptInterface(
+        name="resume_project",
+        description=(
+            "Operational runbook for picking up a story-to-video pipeline "
+            "after the MCP session that started it died (transport drop, "
+            "token TTL expiry, Claude Code restart). The server-side "
+            "workflow state survives — this prompt walks you through "
+            "rediscovering the project_id, reading the surviving state, "
+            "and resuming from the next un-completed media step. "
+            "Documentation-only: produces no data; does not call "
+            "save_step_result. See KAN-127."
+        ),
+        input_schema=_schema(
+            {
+                "context_hint": _str(
+                    "Optional free-text hint about what was being attempted "
+                    "in the dead session (e.g. story title, last tool "
+                    "called). Empty string when none."
+                ),
+            },
+            required=(),
+        ),
+        output_schema_ref="resume_project.json",
+        loops_over=None,
+        depends_on=(),
+        body=(
+            "# Resume a project after a dropped MCP session\n"
+            "\n"
+            "Your previous Claude Code session driving the VividScripts "
+            "pipeline died mid-flight (transport drop, token expiry, "
+            "Claude Code restart, etc.). The server-side workflow state "
+            "is persisted per-project in `mcp_workflow_state.json` — "
+            "nothing was lost. Follow these steps to pick up where the "
+            "previous session left off.\n"
+            "\n"
+            "## Step 1 — Find the orphaned project\n"
+            "\n"
+            "Call `list_projects()`. The response includes every project "
+            "you own with its `project_id`, `project_name`, `status` "
+            "(`draft` / `running` / `compiled` / `failed`), and "
+            "`scene_count`. The orphaned project is almost always the "
+            "most recent one in `running` status.\n"
+            "\n"
+            "If the user gave you a hint (story title, last tool, etc.) "
+            "use it to disambiguate. If multiple `running` projects "
+            "look plausible, ask the user which one before continuing.\n"
+            "\n"
+            "## Step 2 — Read the surviving workflow state\n"
+            "\n"
+            "Call `get_workflow_state(project_id)`. The response gives "
+            "you `completed_steps` (the steps that finished before the "
+            "drop) and `current_step` (the next step the workflow would "
+            "advance to). Treat `current_step` as the resume point.\n"
+            "\n"
+            "## Step 3 — Identify the next media step\n"
+            "\n"
+            "The media steps in order are:\n"
+            "\n"
+            "1. `generate_audio` — TTS narration for every scene.\n"
+            "2. `generate_images` — image generation for every scene.\n"
+            "3. `generate_sfx` — sound-effect synthesis "
+            "(requires `generate_audio` complete).\n"
+            "4. `generate_music` — background music for the chosen mood "
+            "(requires `select_music` first).\n"
+            "5. `generate_thumbnail` — YouTube thumbnail.\n"
+            "6. `compile_video` — final FFmpeg assembly.\n"
+            "\n"
+            "Pick the first one whose corresponding step does not yet "
+            "appear in `completed_steps`. Call `list_workflow_steps()` "
+            "if you need the canonical step catalog and dependency "
+            "graph.\n"
+            "\n"
+            "## Step 4 — Resume by invoking the matching tool\n"
+            "\n"
+            "Call the tool from step 3 with `project_id` as the only "
+            "argument. It returns a `JobSubmission` (`job_id`, "
+            "`job_type`) immediately. Surface that to the user as one "
+            "line: `Resumed: <job_type> job started: <job_id>`.\n"
+            "\n"
+            "## Step 5 — Poll until terminal\n"
+            "\n"
+            "Call `check_job(job_id)` until `status` is `completed` or "
+            "`failed`. On `completed`, repeat steps 3-5 for the next "
+            "media step. On `failed`, surface `JobStatus.error` to the "
+            "user and stop — do not auto-retry.\n"
+            "\n"
+            "Once `compile_video` reports `completed`, the project is "
+            "finished. Call `mint_magic_link(project_id)` to hand the "
+            "user a one-click URL into the editor.\n"
+            "\n"
+            "## What this prompt is *not*\n"
+            "\n"
+            "This is a documentation runbook. There is no "
+            "`save_step_result` call associated with `resume_project` — "
+            "it produces no AI step output. The schema file exists only "
+            "to keep the catalog-alignment tests honest.\n"
+        ),
     ),
 }

@@ -47,13 +47,14 @@ def _text(message: object) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def test_all_19_prompts_registered(backend: MockBackend) -> None:
-    """19 prompts after motion_direction was routed out 2026-05-25 (Test 2)."""
+async def test_all_20_prompts_registered(backend: MockBackend) -> None:
+    """20 prompts: the 19 pipeline + user-tab interfaces plus the
+    KAN-127 ``resume_project`` documentation prompt."""
     mcp = create_mcp_server(backend)
     prompts = await mcp.list_prompts()
     names = {p.name for p in prompts}
     assert names == set(PROMPT_INTERFACES.keys())
-    assert len(prompts) == 19
+    assert len(prompts) == 20
 
 
 async def test_prompt_arguments_mirror_input_schema(backend: MockBackend) -> None:
@@ -149,6 +150,59 @@ async def test_get_prompt_rejects_wrong_typed_context(backend: MockBackend, auth
             },
         )
     assert "paragraph_count" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# Documentation prompts (KAN-127)
+# ---------------------------------------------------------------------------
+
+
+async def test_documentation_prompt_returns_inline_body(backend: MockBackend, authed: None) -> None:
+    """resume_project ships a public runbook body and bypasses the
+    backend ``format_prompt`` + ``save_step_result`` suffix path."""
+    mcp = create_mcp_server(backend)
+    result = await mcp.get_prompt("resume_project", {})
+    assert len(result.messages) == 1
+    body = _text(result.messages[0])
+    # The runbook landmarks the body promises (covered by the unit test
+    # too, but pinned here for the wire surface).
+    assert "Resume a project after a dropped MCP session" in body
+    assert "list_projects()" in body
+    assert "get_workflow_state(project_id)" in body
+    # And — most importantly — the doc prompt does NOT carry the
+    # template-prompt save_step_result trailer that would tell Claude to
+    # call save_step_result for the runbook itself.
+    assert "save_step_result(project_id," not in body
+    # Nor does it embed the canonical output schema block.
+    assert "```json" not in body
+    # Nor does it ever invoke the backend (would have surfaced the
+    # MockBackend stub marker).
+    assert "[MOCK PROMPT" not in body
+
+
+async def test_documentation_prompt_accepts_optional_context_hint(
+    backend: MockBackend, authed: None
+) -> None:
+    """The optional ``context_hint`` argument is accepted but does not
+    change the rendered runbook (the body is verbatim)."""
+    mcp = create_mcp_server(backend)
+    no_hint = await mcp.get_prompt("resume_project", {})
+    with_hint = await mcp.get_prompt(
+        "resume_project",
+        {"context_hint": "the haunted-doorbell story"},
+    )
+    assert _text(no_hint.messages[0]) == _text(with_hint.messages[0])
+
+
+async def test_documentation_prompt_still_requires_authentication(
+    backend: MockBackend,
+) -> None:
+    """Doc prompts skip the backend round-trip but still require Bearer."""
+    set_user_claims(None)
+    mcp = create_mcp_server(backend)
+    with pytest.raises(Exception) as exc:
+        await mcp.get_prompt("resume_project", {})
+    assert "authenticated Bearer context" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------

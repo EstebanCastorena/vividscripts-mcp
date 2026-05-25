@@ -344,6 +344,24 @@ Image-prompt editor that takes an existing image-generation prompt and a user's 
 | `current_prompt` | string | yes | Existing image-generation prompt to edit. |
 | `edit_suggestion` | string | yes | What the user wants to change. |
 
+## Operational runbooks
+
+A small set of prompts are **documentation only** — they ship a public, verbatim runbook body that Claude follows directly rather than a templated agent prompt that goes through the backend. They take optional context arguments but produce no AI step output, so there is no `save_step_result` round-trip and the output schema exists only to keep catalog-alignment tests honest.
+
+### `resume_project` *(documentation, KAN-127)*
+
+Operational runbook for picking up a story-to-video pipeline after the MCP session that started it died (transport drop, token TTL expiry, Claude Code restart). The server-side workflow state survives in `mcp_workflow_state.json`; this prompt walks Claude through rediscovering the `project_id`, reading the surviving state, and resuming from the next un-completed media step.
+
+- **Cadence:** On demand, when an MCP session dies mid-pipeline.
+- **Depends on:** nothing (entry point)
+- **Output schema:** [`schemas/resume_project.json`](../src/vividscripts_mcp/schemas/resume_project.json) — placeholder only; the prompt produces no AI step output.
+
+| Context field | Type | Required | Description |
+|---|---|---|---|
+| `context_hint` | string | no | Optional free-text hint about what was being attempted in the dead session (e.g. story title, last tool called). Empty string when none. |
+
+The runbook drives Claude through `list_projects()` → `get_workflow_state(project_id)` → identifying the first un-completed media step → calling the matching `generate_*` / `compile_video` tool → polling `check_job(job_id)` until terminal. The underlying session-reconnect bug is tracked separately as KAN-123; this prompt is the user-facing workaround.
+
 ---
 
 See [`docs/architecture.md`](architecture.md) for how prompts fit the two-layer split and [`docs/auth.md`](auth.md) for how a client authenticates before it can call any of this.
