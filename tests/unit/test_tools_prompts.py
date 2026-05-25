@@ -47,12 +47,13 @@ def _text(message: object) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def test_all_20_prompts_registered(backend: MockBackend) -> None:
+async def test_all_19_prompts_registered(backend: MockBackend) -> None:
+    """19 prompts after motion_direction was routed out 2026-05-25 (Test 2)."""
     mcp = create_mcp_server(backend)
     prompts = await mcp.list_prompts()
     names = {p.name for p in prompts}
     assert names == set(PROMPT_INTERFACES.keys())
-    assert len(prompts) == 20
+    assert len(prompts) == 19
 
 
 async def test_prompt_arguments_mirror_input_schema(backend: MockBackend) -> None:

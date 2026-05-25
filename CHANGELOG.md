@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- **`animate_scene` MCP tool** and the **`motion_direction` Prompt** are no
+  longer part of the public MCP surface. The Kling image-to-video animation
+  step is the cost-dominant operation in the pipeline (per-second video-model
+  pricing) and should not be invokable by a Claude-driven end-to-end run by
+  accident. The underlying backend job (`submit_job(job_type="animate_scene")`)
+  is intentionally preserved — the web UI's animation button still works, only
+  the MCP entrypoint is removed. Re-enabling is a one-line revert: restore
+  `make_animate_scene_tool` registration in
+  `src/vividscripts_mcp/tools/media.py::register_media_tools` and re-add the
+  `motion_direction` entry in `src/vividscripts_mcp/prompts/definitions.py`.
+- Companion cleanup: removed the orphaned `schemas/motion_direction.json`
+  output schema and `tests/fixtures/step_results/motion_direction.json`
+  fixture. The `MockBackend.WORKFLOW_STEPS` list lost its `video_animation`
+  step. Tool count drops 27→26; Prompt count drops 20→19.
+
+### Context
+
+Driven by the 2026-05-25 Test 2 smoke-test post-mortem
+(`Projects/VividScripts/Post-Mortems/2026-05-25 MCP Story-to-Video Test 2/`
+in Obsidian). Predecessor: Test 1 (2026-05-24, KAN-101..109).
+
 ## [1.0.0] — 2026-05-24
 
 > **v1.0 is the first portfolio-ready release of `vividscripts-mcp`.** Phases 0–5 of the integration are shipped, the package surfaces 27 Tools + 20 Prompts over a Cognito-brokered OAuth 2.1 endpoint, and a 565-test suite — including a 232-test security regression block — gates every commit. The repository is intended to be read top-to-bottom by a reviewer; the [README](README.md), [`docs/architecture.md`](docs/architecture.md), and [`docs/tools.md`](docs/tools.md) are the entry points.

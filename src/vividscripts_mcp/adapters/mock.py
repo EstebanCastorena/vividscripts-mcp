@@ -31,8 +31,9 @@ from vividscripts_mcp.models import (
 )
 from vividscripts_mcp.stepstore import store_step_result
 
-# Mirrors the 16-step pipeline from VividScripts. The MockBackend uses this to
-# advance workflow state; the real backend will return its own definitive list.
+# Mirrors the VividScripts pipeline (15 steps after 2026-05-25 dropping
+# video_animation from the default routine). MockBackend uses this to
+# advance workflow state; the real backend returns its own definitive list.
 WORKFLOW_STEPS: list[StepDefinition] = [
     StepDefinition(
         name="project_setup",
@@ -123,13 +124,11 @@ WORKFLOW_STEPS: list[StepDefinition] = [
         depends_on=["image_direction"],
         loops_over="segment",
     ),
-    StepDefinition(
-        name="video_animation",
-        description="Optional Kling animation for intro scenes",
-        ai_required=True,
-        depends_on=["image_generation"],
-        loops_over="scene",
-    ),
+    # video_animation step removed 2026-05-25 (Test 2 post-mortem). The
+    # Kling animation pass is no longer part of the default routine because
+    # of its cost. Backend can still execute the underlying job; the MCP
+    # surface no longer exposes it. See tools/media.py for the matching
+    # change to the tool catalog.
     StepDefinition(
         name="thumbnail",
         description="Thumbnail image + overlay text",
