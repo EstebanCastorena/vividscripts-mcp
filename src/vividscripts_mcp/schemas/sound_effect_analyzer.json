@@ -4,23 +4,33 @@
   "properties": {
     "effects": {
       "type": "array",
+      "description": "Concrete sound-effect placements for the scene. Each entry is an object with EXACTLY these field names: 'name' (effect id from the catalog), 'time' (start time in seconds — NOT named 'start'), 'volume_level' (the enum 'LOW'|'MEDIUM'|'HIGH' — NOT a 0..1 float and NOT named 'volume'). Optional 'duration' is in seconds.",
       "items": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "name": {
-            "type": "string"
+            "type": "string",
+            "description": "Identifier of the sound effect from the available_effects catalog (e.g. 'floor_creak', 'wind_gust')."
           },
           "time": {
-            "type": "number"
+            "type": "number",
+            "description": "Placement time in seconds from the start of the scene audio. Field name is 'time', NOT 'start' or 'start_time'.",
+            "minimum": 0
           },
           "volume_level": {
             "type": "string",
+            "description": "Categorical volume level. Must be one of the enum values 'LOW', 'MEDIUM', 'HIGH'. Field name is 'volume_level' (NOT 'volume'); the value is the enum string (NOT a 0..1 float).",
             "enum": [
               "LOW",
               "MEDIUM",
               "HIGH"
             ]
+          },
+          "duration": {
+            "type": "number",
+            "description": "Optional duration of the effect in seconds (omit if the catalog default should be used).",
+            "minimum": 0
           }
         },
         "required": [
@@ -28,16 +38,24 @@
           "time",
           "volume_level"
         ]
-      }
+      },
+      "examples": [
+        [
+          {"name": "floor_creak", "time": 3.2, "volume_level": "MEDIUM"},
+          {"name": "wind_gust", "time": 5.0, "volume_level": "LOW", "duration": 1.5}
+        ]
+      ]
     },
     "suggested_effects": {
       "type": "array",
+      "description": "Optional list of effect ideas not present in the catalog that the designer recommends sourcing. Each entry is an object with a 'description' string key.",
       "items": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Free-form description of a suggested sound effect (e.g. 'low brass swell as the door opens')."
           }
         },
         "required": [

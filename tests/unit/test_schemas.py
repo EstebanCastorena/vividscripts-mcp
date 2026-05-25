@@ -169,3 +169,117 @@ def test_validate_is_pure_no_mutation() -> None:
     before = copy.deepcopy(fixture)
     validate_step_result("narration_grouping", fixture)
     assert fixture == before
+
+
+# ---------------------------------------------------------------------------
+# Schema-description drift guard (KAN-125)
+# ---------------------------------------------------------------------------
+#
+# Three smoke-test papercuts from 2026-05-25 (Test 2) all had the same root
+# cause: a schema accepted a non-string scalar / structured shape but its
+# JSON-Schema had no ``description`` telling the caller what shape to
+# produce. The first-pass guess was prose-shaped and validation failed in
+# a way that did not tell you HOW to fix it.
+#
+# This guard locks down the schemas the smoke test caught (story_blueprint,
+# stage_direction_bible, sound_effect_category, sound_effect_analyzer) so a
+# future edit that strips a description / enum / sub-property regresses
+# loudly here instead of silently in a Claude Code session.
+
+
+def _load(step: str) -> dict[str, object]:
+    return json.loads((_SCHEMA_DIR / f"{step}.json").read_text(encoding="utf-8"))
+
+
+def test_story_blueprint_tension_description_mentions_integer_and_scale() -> None:
+    """``paragraph_analyses[].tension`` is an integer 1-10; its description
+    must say so explicitly. Prose like 'high' must not be a plausible guess."""
+    schema = _load("story_blueprint")
+    tension = schema["properties"]["paragraph_analyses"]["items"]["properties"]["tension"]  # type: ignore[index]
+    desc = tension.get("description", "")  # type: ignore[attr-defined]
+    assert desc, "story_blueprint.paragraph_analyses[].tension has no description"
+    lowered = desc.lower()
+    assert "integer" in lowered, f"tension.description must mention 'integer': {desc!r}"
+    assert "1-10" in desc or "1 to 10" in lowered, (
+        f"tension.description must spell out the 1-10 scale: {desc!r}"
+    )
+    assert tension.get("minimum") == 1 and tension.get("maximum") == 10, (  # type: ignore[attr-defined]
+        "tension must declare minimum=1 and maximum=10 to match the documented scale"
+    )
+
+
+def test_stage_direction_bible_reference_guide_declares_object_shape() -> None:
+    """``reference_guide`` is an object, not free-form prose. Its description
+    must say 'object' and it must declare the expected sub-keys so the
+    caller knows what to produce on the first try."""
+    schema = _load("stage_direction_bible")
+    rg = schema["properties"]["reference_guide"]  # type: ignore[index]
+    desc = rg.get("description", "")  # type: ignore[attr-defined]
+    assert desc, "stage_direction_bible.reference_guide has no description"
+    assert "object" in desc.lower(), (
+        f"reference_guide.description must clarify it is an object: {desc!r}"
+    )
+    sub_props = rg.get("properties", {})  # type: ignore[attr-defined]
+    assert "characters" in sub_props and "locations" in sub_props, (
+        "reference_guide must declare 'characters' and 'locations' sub-properties "
+        f"(found: {sorted(sub_props)})"
+    )
+
+
+def test_sound_effect_category_items_describe_object_shape() -> None:
+    """``selected_categories[]`` must be an object with a 'category' key,
+    not a bare string. Description must convey that + an example payload."""
+    schema = _load("sound_effect_category")
+    sc = schema["properties"]["selected_categories"]  # type: ignore[index]
+    desc = sc.get("description", "")  # type: ignore[attr-defined]
+    assert desc, "sound_effect_category.selected_categories has no description"
+    lowered = desc.lower()
+    assert "object" in lowered, (
+        f"selected_categories.description must say each item is an object: {desc!r}"
+    )
+    assert "category" in lowered, (
+        f"selected_categories.description must name the 'category' key: {desc!r}"
+    )
+    assert sc.get("examples"), (  # type: ignore[attr-defined]
+        "selected_categories must carry an 'examples' payload so the prompt body "
+        "can show a minimal valid example"
+    )
+
+
+def test_sound_effect_analyzer_effects_describe_enum_and_field_names() -> None:
+    """``effects[]`` had three pitfalls: time vs start, volume_level vs
+    volume, enum vs 0..1 float. All three must be spelled out in the
+    descriptions so the first guess succeeds."""
+    schema = _load("sound_effect_analyzer")
+    effects = schema["properties"]["effects"]  # type: ignore[index]
+    effects_desc = effects.get("description", "")  # type: ignore[attr-defined]
+    assert effects_desc, "sound_effect_analyzer.effects has no description"
+    # The wrapper description should name all three exact field names so a
+    # caller skimming it can't drift back to 'start' or 'volume'.
+    for token in ("name", "time", "volume_level"):
+        assert token in effects_desc, (
+            f"effects.description must mention {token!r} so callers don't drift "
+            f"to the wrong field name: {effects_desc!r}"
+        )
+
+    item_props = effects["items"]["properties"]  # type: ignore[index]
+
+    time_desc = item_props["time"].get("description", "")
+    assert time_desc and "time" in time_desc.lower(), (
+        f"effects[].time needs a description referencing the field name: {time_desc!r}"
+    )
+
+    vol = item_props["volume_level"]
+    vol_desc = vol.get("description", "")
+    assert vol_desc, "effects[].volume_level has no description"
+    assert "enum" in vol_desc.lower(), (
+        f"volume_level.description must clarify it is an enum (not a float): {vol_desc!r}"
+    )
+    assert vol.get("enum") == ["LOW", "MEDIUM", "HIGH"], (
+        f"volume_level enum must be exactly LOW/MEDIUM/HIGH, got {vol.get('enum')!r}"
+    )
+
+    assert effects.get("examples"), (  # type: ignore[attr-defined]
+        "effects must carry an 'examples' payload so the prompt body can show a "
+        "minimal valid example with the correct field names"
+    )

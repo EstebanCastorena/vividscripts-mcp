@@ -3,76 +3,101 @@
   "type": "object",
   "properties": {
     "genre": {
-      "type": "string"
+      "type": "string",
+      "description": "Primary genre of the story (e.g. 'horror', 'sci-fi', 'romance')."
     },
     "sub_genre": {
-      "type": "string"
+      "type": "string",
+      "description": "Sub-genre refinement (e.g. 'cosmic horror', 'cyberpunk noir')."
     },
     "tone": {
-      "type": "string"
+      "type": "string",
+      "description": "Overall emotional tone (e.g. 'dread', 'whimsical', 'melancholy')."
     },
     "narrative_structure": {
-      "type": "string"
+      "type": "string",
+      "description": "Structural pattern (e.g. 'three-act', 'in medias res', 'frame story')."
     },
     "act_boundaries": {
       "type": "array",
+      "description": "Paragraph indices (0-based integers) marking act transitions.",
       "items": {
         "type": "integer"
       }
     },
     "climax_paragraph": {
-      "type": "integer"
+      "type": "integer",
+      "description": "Zero-based paragraph index where the climax occurs."
     },
     "color_palette_guidance": {
-      "type": "string"
+      "type": "string",
+      "description": "Free-form color/palette direction for downstream image prompts."
     },
     "lighting_arc": {
-      "type": "string"
+      "type": "string",
+      "description": "Free-form description of how lighting evolves through the story."
     },
     "pacing_signature": {
-      "type": "string"
+      "type": "string",
+      "description": "Free-form description of the story's pacing rhythm."
     },
     "creative_direction": {
-      "type": "string"
+      "type": "string",
+      "description": "Free-form summary of the overall visual creative direction."
     },
     "shot_plan": {
-      "type": "string"
+      "type": "string",
+      "description": "Free-form shot-planning guidance for the storyboard."
     },
     "motion_plan": {
-      "type": "string"
+      "type": "string",
+      "description": "Free-form motion-planning guidance for animated scenes."
     },
     "transition_plan": {
-      "type": "string"
+      "type": "string",
+      "description": "Free-form transition-planning guidance between scenes."
     },
     "paragraph_analyses": {
       "type": "array",
+      "description": "Per-paragraph analytic notes; one entry per paragraph in the story.",
       "items": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "paragraph_index": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Zero-based index of the paragraph being analyzed.",
+            "minimum": 0
           },
           "tension": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Narrative tension score on a 1-10 integer scale, where 1 = calm/exposition and 10 = peak conflict/climax. Must be a number, not a prose description.",
+            "minimum": 1,
+            "maximum": 10
           },
           "scene_type": {
-            "type": "string"
+            "type": "string",
+            "description": "Free-form scene-type label (e.g. 'exposition', 'rising action', 'reveal')."
           },
           "grouping_hint": {
-            "type": "string"
+            "type": "string",
+            "description": "Optional hint for downstream narration_grouping (free-form prose)."
           },
           "grouping_rationale": {
-            "type": "string"
+            "type": "string",
+            "description": "Optional rationale for the grouping hint (free-form prose)."
           },
           "visual_intensity": {
-            "type": "string"
+            "type": "string",
+            "description": "Free-form qualitative visual-intensity label (e.g. 'low', 'medium', 'high')."
           },
           "viewer_emotion": {
-            "type": "string"
+            "type": "string",
+            "description": "Free-form target viewer emotion at this paragraph."
           },
           "shot_type": {
-            "type": "string"
+            "type": "string",
+            "description": "Free-form shot-type suggestion (e.g. 'close-up', 'wide establishing')."
           }
         },
         "required": [
@@ -83,24 +108,30 @@
     },
     "character_archetypes": {
       "type": "array",
+      "description": "List of character archetype entries identified in the story.",
       "items": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "name": {
-            "type": "string"
+            "type": "string",
+            "description": "Character's name as referenced in the story."
           },
           "role": {
-            "type": "string"
+            "type": "string",
+            "description": "Role in the narrative (e.g. 'protagonist', 'foil', 'mentor')."
           },
           "archetype": {
-            "type": "string"
+            "type": "string",
+            "description": "Classic archetype label (e.g. 'reluctant hero', 'trickster')."
           },
           "narrator_visibility": {
-            "type": "string"
+            "type": "string",
+            "description": "Whether the narrator appears in-frame, off-frame, or not at all (free-form label)."
           },
           "visual_note": {
-            "type": "string"
+            "type": "string",
+            "description": "Free-form visual continuity note for this character."
           }
         },
         "required": [
