@@ -52,3 +52,6 @@ coverage.xml
 # Local data (mock backend can write here in dev)
 .local-data/
 .git-commit-message-tmp.txt
+
+# gh pr diff leftovers
+pr*.diff
