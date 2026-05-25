@@ -3,7 +3,25 @@
   "type": "object",
   "properties": {
     "reference_guide": {
-      "type": "object"
+      "type": "object",
+      "description": "Story-wide visual continuity bible. Must be a JSON object (not free-form prose) with at minimum the keys 'characters' and 'locations'. Each maps a name to an object holding the per-entity visual continuity facts the downstream stage_direction_* prompts will reuse for every scene.",
+      "properties": {
+        "characters": {
+          "type": "object",
+          "description": "Map of character_name -> per-character visual continuity object (identity pack, costume, distinguishing features, narrator visibility, etc.). Empty object {} is valid when the story has no named characters.",
+          "additionalProperties": true
+        },
+        "locations": {
+          "type": "object",
+          "description": "Map of location_name -> per-location visual continuity object (setting, lighting motif, palette, recurring motifs, art style notes). Empty object {} is valid when the story has no recurring named locations.",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "characters",
+        "locations"
+      ],
+      "additionalProperties": true
     }
   },
   "required": [

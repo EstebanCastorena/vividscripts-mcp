@@ -4,18 +4,26 @@
   "properties": {
     "selected_categories": {
       "type": "array",
+      "description": "List of sound-effect category selections for the scene. Each entry must be an object with a 'category' string key, NOT a bare string. Example: [{\"category\": \"horror_ambience\"}, {\"category\": \"footsteps\"}].",
       "items": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "category": {
-            "type": "string"
+            "type": "string",
+            "description": "Category identifier from the SFX catalog passed in the prompt context (e.g. 'horror_ambience', 'footsteps', 'wind')."
           }
         },
         "required": [
           "category"
         ]
-      }
+      },
+      "examples": [
+        [
+          {"category": "horror_ambience"},
+          {"category": "footsteps"}
+        ]
+      ]
     }
   },
   "required": [
