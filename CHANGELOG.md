@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`resume_project` MCP Prompt (KAN-127)** — a new *documentation* prompt
+  that walks Claude through picking up a story-to-video pipeline after the
+  MCP session that started it died (transport drop, token TTL expiry,
+  Claude Code restart). The prompt's body is the public runbook itself:
+  `list_projects` → `get_workflow_state(project_id)` → identify the next
+  un-completed media step → call the matching `generate_*` / `compile_video`
+  → poll `check_job(job_id)`. No `save_step_result` round-trip — the prompt
+  produces no AI step output. New `PromptInterface.body` field carries the
+  inline runbook so documentation prompts can ship public bodies without
+  going through the backend's `format_prompt` path. The underlying
+  session-reconnect bug is tracked separately as KAN-123; this prompt is
+  the user-facing workaround. Regression test in
+  `tests/integration/test_resume_flow.py` proves that as long as the
+  backend survives, a fresh MCP client against it can resume from any
+  previous client's state. Prompt count: 19 → 20.
+
 ### Removed
 
 - **`animate_scene` MCP tool** and the **`motion_direction` Prompt** are no

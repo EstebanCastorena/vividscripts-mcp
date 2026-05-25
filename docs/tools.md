@@ -12,7 +12,7 @@ Two notes before diving in:
 | Surface | Count | Notes |
 |---|---|---|
 | Tools | **27** | All user-scoped via Bearer token; `project_id`/`scene_index` validated at the protocol boundary |
-| Prompts | **20** | 18 in the main pipeline + 2 user-initiated (`story_optimization`, `image_prompt_edit`) |
+| Prompts | **20** | 17 in the main pipeline + 2 user-initiated (`story_optimization`, `image_prompt_edit`) + 1 operational runbook (`resume_project`) |
 | Resources | 0 (planned) | URI scheme reserved; see [Resources](#resources) below |
 
 `list_workflow_steps` describes the 16-step pipeline as one tool call; the 20 Prompts are the AI consultation points within it.
@@ -128,7 +128,7 @@ Persists an AI step result for a project. Validates the result against the step'
 
 #### `get_workflow_state`
 
-Returns the project's current pipeline position — `status`, `completed_steps`, `current_step`, accumulated `current_data` (blueprint, scenes, bibles, etc.). Enough state to resume a workflow mid-flight if Claude Code is restarted.
+Returns the project's current pipeline position — `status`, `completed_steps`, `current_step`, accumulated `current_data` (blueprint, scenes, bibles, etc.). Enough state to resume a workflow mid-flight if Claude Code is restarted. If your MCP session dies mid-pipeline, ask Claude to use the [`resume_project`](prompts.md#resume_project-documentation-kan-127) prompt — it walks you through picking up where the previous session left off, starting with `list_projects` and this tool.
 
 <!-- gen-tools:start name=get_workflow_state -->
 | Param | Type | Required | Description |

@@ -125,8 +125,9 @@ def create_mcp_server(
     mcp.tool()(make_list_projects_tool(backend))
     mcp.tool()(make_get_project_tool(backend))
 
-    # KAN-58 — 20 MCP Prompts + the backend-served list_workflow_steps
-    # (replaces Phase 1's empty-list stub).
+    # KAN-58 — MCP Prompt catalog + the backend-served list_workflow_steps
+    # (replaces Phase 1's empty-list stub). Count is owned by
+    # ``PROMPT_INTERFACES`` and asserted in tests rather than spelled here.
     register_prompts(mcp, backend)
 
     # KAN-59 — save_step_result + get_workflow_state + custom overrides.

@@ -1,10 +1,10 @@
 """MCP Prompts wire + list_workflow_steps tool (KAN-58).
 
-The 20 :data:`PROMPT_INTERFACES` entries are registered as native MCP
+The :data:`PROMPT_INTERFACES` entries are registered as native MCP
 Prompts. In Claude Code they surface as ``/slash-commands``; Claude Code
 also calls them programmatically via ``prompts/get``.
 
-``prompts/get`` flow:
+``prompts/get`` flow (template prompts):
 
 1. The provided context is schema-validated against the prompt's
    ``input_schema`` (KAN-56) — bad context fails *before* the backend
@@ -17,6 +17,14 @@ also calls them programmatically via ``prompts/get``.
 3. The canonical output schema (KAN-57, ``schemas/<name>.json``) is
    appended to the message so Claude Code knows exactly what shape to
    return and that ``save_step_result`` will validate it.
+
+``prompts/get`` flow (documentation prompts — KAN-127):
+
+An interface with ``body`` set is a self-contained operational
+runbook. The body is rendered verbatim — no backend round-trip, no
+``save_step_result`` suffix. Input is still schema-validated so
+unknown kwargs surface as errors. ``resume_project`` is the first
+documentation prompt; the renderer here is generic.
 
 ``list_workflow_steps`` is wired to the backend here, replacing the
 Phase 1 ``return []`` stub.
@@ -55,6 +63,7 @@ def _build_prompt(backend: BackendProtocol, interface: PromptInterface) -> Promp
     output_schema = get_output_schema(interface.name) or {"type": "object"}
     output_schema_json = json.dumps(output_schema, indent=2)
     step_name = interface.name
+    documentation_body = interface.body
 
     def render(**kwargs: object) -> list[UserMessage]:
         context = dict(kwargs)
@@ -68,6 +77,13 @@ def _build_prompt(backend: BackendProtocol, interface: PromptInterface) -> Promp
                 for e in errors
             )
             raise ValueError(f"invalid context for {step_name}: {detail}")
+
+        # Documentation prompts (KAN-127) ship a public runbook body
+        # and skip the backend round-trip + save_step_result suffix.
+        # Auth is still required so the surface stays uniform.
+        require_user_claims()
+        if documentation_body is not None:
+            return [UserMessage(documentation_body)]
 
         user_id = require_user_claims().sub
         payload = backend.format_prompt(
@@ -113,7 +129,7 @@ def make_list_workflow_steps_tool(
 
 
 def register_prompts(mcp: FastMCP, backend: BackendProtocol) -> None:
-    """Register all 20 MCP Prompts + the list_workflow_steps tool."""
+    """Register every MCP Prompt + the list_workflow_steps tool."""
     for interface in PROMPT_INTERFACES.values():
         mcp.add_prompt(_build_prompt(backend, interface))
     mcp.tool()(make_list_workflow_steps_tool(backend))
