@@ -178,15 +178,35 @@ def make_generate_music_tool(
 
 def make_compile_video_tool(
     backend: BackendProtocol,
-) -> Callable[[str], JobSubmission]:
-    """Build the ``compile_video`` tool bound to ``backend`` (KAN-73)."""
+) -> Callable[..., JobSubmission]:
+    """Build the ``compile_video`` tool bound to ``backend`` (KAN-73 + KAN-130).
 
-    def compile_video(project_id: str) -> JobSubmission:
+    KAN-130: the tool reads ``backend.check_compile_readiness`` first and
+    refuses to submit when any expected audio/visual layer is missing or
+    a related render job is still in flight — unless the caller passes
+    the matching ``skip_*`` flag. This closes the silent-narration-only
+    failure mode from the 2026-05-26 end-to-end post-mortem.
+    """
+
+    def compile_video(
+        project_id: str,
+        skip_music: bool = False,
+        skip_sfx: bool = False,
+        skip_thumbnail: bool = False,
+    ) -> JobSubmission:
         """Start final video assembly (FFmpeg) for the project.
 
         Async — returns a ``job_id`` immediately; poll ``check_job``
-        until terminal. Requires every scene to have an image + audio
-        and a short title (run the earlier media steps first).
+        until terminal. Every scene must already have an image and
+        narration audio.
+
+        **Preconditions (KAN-130).** Refuses with ``ValueError`` when any
+        optional asset layer hasn't been rendered yet — ``music`` (run
+        ``generate_music``), ``sfx`` (run ``generate_sfx``), or
+        ``thumbnail`` (run ``generate_thumbnail``). Pass ``skip_music``,
+        ``skip_sfx``, or ``skip_thumbnail`` to proceed without a given
+        layer. Also refuses while any of those render jobs is still
+        ``running`` for this project — wait for it instead.
 
         On success ``check_job``'s ``result`` carries the compiled
         ``video_path``; the shareable editor/watch URLs are added by
@@ -196,11 +216,55 @@ def make_compile_video_tool(
         ``Compile job started: <job_id> — poll check_job for progress.``
         """
         user_id = require_user_claims().sub
+
+        # KAN-130 — precondition check. Asset-class names are stable
+        # public vocabulary (see CompileReadiness docstring); the skip
+        # flags use the same names.
+        readiness = backend.check_compile_readiness(user_id=user_id, project_id=project_id)
+        skipped: set[str] = set()
+        if skip_music:
+            skipped.add("music")
+        if skip_sfx:
+            skipped.add("sfx")
+        if skip_thumbnail:
+            skipped.add("thumbnail")
+
+        # Running jobs are never silently skippable — the caller should
+        # wait for them so the compile picks up the layer the user just
+        # asked the backend to render. (If they truly want to compile
+        # without it, cancel the job and skip explicitly.)
+        if readiness.running:
+            running = ", ".join(sorted(readiness.running))
+            msg = (
+                f"compile_video can't start while these render jobs are still "
+                f"running for this project: {running}. Wait for them to finish, "
+                "or cancel them and pass the matching skip_<asset>=True."
+            )
+            raise ValueError(msg)
+
+        blocked = sorted(set(readiness.missing) - skipped)
+        if blocked:
+            blocked_str = ", ".join(blocked)
+            hints = ", ".join(f"generate_{name}" for name in blocked)
+            skips = ", ".join(f"skip_{name}=True" for name in blocked)
+            msg = (
+                f"compile_video preconditions not met — missing: {blocked_str}. "
+                f"Run: {hints} (then poll check_job until completed), or pass "
+                f"{skips} to proceed without those layers."
+            )
+            raise ValueError(msg)
+
+        params: dict[str, list[str]] = {}
+        if skipped:
+            # Forward skips so the backend's compiler can record which
+            # layers were intentionally omitted (useful for the
+            # video_completeness rollup and for later audits).
+            params["skip"] = sorted(skipped)
         job_id = backend.submit_job(
             user_id=user_id,
             project_id=project_id,
             job_type="compile_video",
-            params={},
+            params=params,
         )
         return JobSubmission(job_id=job_id, job_type="compile_video")
 

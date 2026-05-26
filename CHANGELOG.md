@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`compile_video` precondition checks (KAN-130)** — `compile_video`
+  now reads `check_compile_readiness` before submitting the job and
+  refuses with a `ValueError` ("compile_video preconditions not met —
+  missing: music, sfx, thumbnail. Run: generate_music, generate_sfx,
+  generate_thumbnail …") when any optional audio/visual layer hasn't
+  been rendered yet. The error message names which generate_* tools to
+  run AND which skip_<asset>=True flags to pass to opt out. Also refuses
+  while any of those render jobs is still `running` for the project —
+  closes the race condition that shipped a music-less video in the
+  2026-05-26 end-to-end post-mortem. New `skip_music` / `skip_sfx` /
+  `skip_thumbnail` kwargs on `compile_video` let callers proceed
+  without a given layer; the skip set is forwarded into the compile
+  job's `params["skip"]` for audit. New `CompileReadiness` model +
+  `BackendProtocol.check_compile_readiness` method speak asset-class
+  names (`music`, `sfx`, `thumbnail`) rather than `generate_*` job
+  types so the tool layer's public vocabulary stays decoupled from the
+  backend's job catalog. `title_card` is intentionally excluded from
+  preconditions until KAN-131 ships the renderer.
+
 - **`get_thumbnail_download_url` MCP tool (KAN-132)** — mirrors
   `get_video_download_url`. Returns `{url, expires_at}` with a short-lived
   signed URL to the rendered thumbnail PNG. Refuses with a clear

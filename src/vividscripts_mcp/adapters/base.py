@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from vividscripts_mcp.models import (
+    CompileReadiness,
     JobStatus,
     MusicSelection,
     ProjectDetail,
@@ -97,6 +98,18 @@ class BackendProtocol(Protocol):
         ...
 
     def check_job(self, user_id: str, job_id: str) -> JobStatus: ...
+
+    def check_compile_readiness(self, user_id: str, project_id: str) -> CompileReadiness:
+        """Report whether the project is ready for ``compile_video``.
+
+        KAN-130. Returns the set of optional asset layers that haven't
+        been rendered yet (``missing``) and the set of related render
+        jobs still in flight (``running``). The ``compile_video`` MCP
+        tool reads this before submitting the job; the backend itself
+        does not enforce — ``submit_job(job_type="compile_video")``
+        remains the low-level escape hatch.
+        """
+        ...
 
     def select_music(self, user_id: str, project_id: str, mood: str) -> MusicSelection:
         """Choose a background-music mood for the project (synchronous).
