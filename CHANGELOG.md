@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-asset render status on `get_project` (KAN-136)** — `ProjectDetail`
+  now carries a `ProjectAssets` block (`music`, `sfx`, `thumbnail`,
+  `title_card`) and a `video_completeness` rollup (`complete` / `partial`
+  / `minimal`). `scene_summaries` entries additionally expose `has_sfx`.
+  Lets agents (and the future `generate_video_end_to_end` orchestrator)
+  verify post-compile completeness without listening to the mp4. Driven
+  by the 2026-05-26 end-to-end post-mortem: `compile_video` was happily
+  succeeding with narration only, and `video_status: ready` was the only
+  completeness signal — misleadingly green. `MockBackend.submit_job` now
+  records the completed `job_type` against the project so the new fields
+  populate deterministically; `title_card` is plumbed for forward compat
+  but excluded from the `complete` rollup until KAN-131 ships the
+  renderer.
+
 - **`resume_project` MCP Prompt (KAN-127)** — a new *documentation* prompt
   that walks Claude through picking up a story-to-video pipeline after the
   MCP session that started it died (transport drop, token TTL expiry,
