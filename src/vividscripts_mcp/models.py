@@ -66,6 +66,33 @@ class ProjectSummary(BaseModel):
     video_url: str | None = None
 
 
+class ProjectAssets(BaseModel):
+    """Per-asset render status for the project (KAN-136).
+
+    Flags whether each post-compile audio/visual layer is bound:
+
+    - ``music``: a background-music track has been generated/selected
+    - ``sfx``: sound effects have been rendered for the project
+    - ``thumbnail``: the YouTube thumbnail PNG has been rendered
+    - ``title_card``: a title-card asset has been rendered (KAN-131; always
+      ``False`` until that ticket lands — kept for forward compatibility so
+      callers can write today's verification code against the final shape)
+
+    Drives the ``video_completeness`` rollup on :class:`ProjectDetail` and
+    feeds the ``compile_video`` precondition check (KAN-130).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    music: bool = False
+    sfx: bool = False
+    thumbnail: bool = False
+    title_card: bool = False
+
+
+VideoCompleteness = Literal["complete", "partial", "minimal"]
+
+
 class ProjectDetail(BaseModel):
     """Full project view for get_project."""
 
@@ -76,6 +103,23 @@ class ProjectDetail(BaseModel):
     metadata: dict[str, Any]
     scene_summaries: list[dict[str, Any]]
     video_status: Literal["none", "compiling", "ready", "failed"]
+    # KAN-136 — agents can't verify completeness from ``video_status`` alone
+    # (it's ``ready`` even when SFX/music aren't bound). ``assets`` and
+    # ``video_completeness`` give a programmatic completeness signal so the
+    # ``generate_video_end_to_end`` orchestrator (KAN-133) and the
+    # ``compile_video`` precondition check (KAN-130) don't have to listen
+    # to the mp4 to know what shipped.
+    assets: ProjectAssets = Field(default_factory=ProjectAssets)
+    video_completeness: VideoCompleteness = Field(
+        default="minimal",
+        description=(
+            "Rollup of supported renderable asset layers. 'complete' = every "
+            "renderable layer bound (today: music + sfx + thumbnail; title_card "
+            "joins the rollup when KAN-131 lands). 'partial' = at least one but "
+            "not all. 'minimal' = none — the compile shipped narration + scene "
+            "images only."
+        ),
+    )
     blueprint_summary: dict[str, Any] | None = None
     editor_url: str
 

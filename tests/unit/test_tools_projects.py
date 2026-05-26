@@ -214,3 +214,99 @@ def test_tools_registered_on_mcp_server() -> None:
     tools = asyncio.run(mcp.list_tools())
     names = {t.name for t in tools}
     assert {"create_project", "list_projects", "get_project"} <= names
+
+
+# ---------------------------------------------------------------------------
+# KAN-136 — per-asset render status on get_project
+# ---------------------------------------------------------------------------
+
+
+def test_get_project_new_project_reports_minimal_completeness(
+    backend: MockBackend,
+    alpha_session: None,
+    settings: ProjectSettings,
+) -> None:
+    """A fresh project has nothing rendered → all asset flags False, rollup 'minimal'."""
+    info = make_create_project_tool(backend)("my story", settings)
+    detail = make_get_project_tool(backend)(info.project_id)
+    assert detail.assets.music is False
+    assert detail.assets.sfx is False
+    assert detail.assets.thumbnail is False
+    assert detail.assets.title_card is False
+    assert detail.video_completeness == "minimal"
+
+
+def test_get_project_asset_flags_flip_after_render_jobs(
+    backend: MockBackend,
+    alpha_session: None,
+    settings: ProjectSettings,
+) -> None:
+    """Each generate_* job that completes updates the corresponding asset flag."""
+    info = make_create_project_tool(backend)("my story", settings)
+    user_id = "user-alpha"
+
+    backend.submit_job(user_id, info.project_id, "generate_music", {})
+    detail = make_get_project_tool(backend)(info.project_id)
+    assert detail.assets.music is True
+    assert detail.video_completeness == "partial"
+
+    backend.submit_job(user_id, info.project_id, "generate_sfx", {})
+    backend.submit_job(user_id, info.project_id, "generate_thumbnail", {})
+    detail = make_get_project_tool(backend)(info.project_id)
+    assert detail.assets.sfx is True
+    assert detail.assets.thumbnail is True
+    # title_card stays False — no render path yet (KAN-131).
+    assert detail.assets.title_card is False
+    # 'complete' rollup excludes title_card until KAN-131 wires it.
+    assert detail.video_completeness == "complete"
+
+
+def test_get_project_scene_summaries_carry_has_sfx(
+    backend: MockBackend,
+    alpha_session: None,
+    settings: ProjectSettings,
+) -> None:
+    """generate_sfx marks every existing scene as having SFX."""
+    info = make_create_project_tool(backend)("my story", settings)
+    user_id = "user-alpha"
+    backend.add_scene(user_id, info.project_id, after_index=-1, text="scene 1 text")
+    backend.add_scene(user_id, info.project_id, after_index=0, text="scene 2 text")
+
+    detail_before = make_get_project_tool(backend)(info.project_id)
+    assert all(s["has_sfx"] is False for s in detail_before.scene_summaries)
+
+    backend.submit_job(user_id, info.project_id, "generate_sfx", {})
+    detail_after = make_get_project_tool(backend)(info.project_id)
+    assert all(s["has_sfx"] is True for s in detail_after.scene_summaries)
+
+
+def test_get_project_compile_video_sets_video_status_ready(
+    backend: MockBackend,
+    alpha_session: None,
+    settings: ProjectSettings,
+) -> None:
+    """compile_video flips video_status to 'ready' (independent of asset flags)."""
+    info = make_create_project_tool(backend)("my story", settings)
+    user_id = "user-alpha"
+    assert make_get_project_tool(backend)(info.project_id).video_status == "none"
+    backend.submit_job(user_id, info.project_id, "compile_video", {})
+    assert make_get_project_tool(backend)(info.project_id).video_status == "ready"
+
+
+def test_duplicate_project_inherits_asset_state(
+    backend: MockBackend,
+    alpha_session: None,
+    settings: ProjectSettings,
+) -> None:
+    """A duplicate carries forward the original's render state."""
+    info = make_create_project_tool(backend)("my story", settings)
+    user_id = "user-alpha"
+    backend.submit_job(user_id, info.project_id, "generate_music", {})
+    backend.submit_job(user_id, info.project_id, "generate_thumbnail", {})
+
+    dup_info = backend.duplicate_project(user_id, info.project_id, new_name="copy")
+    dup_detail = backend.get_project(user_id, dup_info.project_id)
+    assert dup_detail.assets.music is True
+    assert dup_detail.assets.thumbnail is True
+    assert dup_detail.assets.sfx is False
+    assert dup_detail.video_completeness == "partial"

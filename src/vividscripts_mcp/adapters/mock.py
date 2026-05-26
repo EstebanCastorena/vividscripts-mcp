@@ -19,6 +19,7 @@ from typing import Any, ClassVar, Literal
 from vividscripts_mcp.models import (
     JobStatus,
     MusicSelection,
+    ProjectAssets,
     ProjectDetail,
     ProjectInfo,
     ProjectSettings,
@@ -27,6 +28,7 @@ from vividscripts_mcp.models import (
     Scene,
     StepDefinition,
     StepResultOutcome,
+    VideoCompleteness,
     WorkflowState,
 )
 from vividscripts_mcp.stepstore import store_step_result
@@ -159,6 +161,14 @@ class _ProjectState:
         self.current_data: dict[str, Any] = {"story": story, "settings": settings.model_dump()}
         self.scenes: list[Scene] = []
         self.video_status: str = "none"
+        # KAN-136 — per-asset render tracking. ``completed_job_types`` is
+        # the source of truth for ``ProjectAssets`` flags; ``scenes_with_sfx``
+        # carries per-scene SFX presence so ``scene_summaries`` can surface
+        # ``has_sfx``. Real backends would populate these from job-completion
+        # callbacks; the mock fills them when ``submit_job`` marks a job
+        # ``completed``.
+        self.completed_job_types: set[str] = set()
+        self.scenes_with_sfx: set[int] = set()
 
 
 class MockBackend:
@@ -227,12 +237,25 @@ class MockBackend:
     def get_project(self, user_id: str, project_id: str) -> ProjectDetail:
         with self._lock:
             state = self._require(user_id, project_id)
+            assets = self._project_assets(state)
             return ProjectDetail(
                 project_id=state.project_id,
                 project_name=state.project_name,
                 metadata={"settings": state.settings.model_dump()},
-                scene_summaries=[{"index": s.index, "text": s.text[:80]} for s in state.scenes],
+                scene_summaries=[
+                    {
+                        "index": s.index,
+                        "text": s.text[:80],
+                        # KAN-136 — per-scene SFX presence. Image/audio
+                        # presence is already implied by Scene.image_url /
+                        # Scene.audio_url being non-null in get_scenes.
+                        "has_sfx": s.index in state.scenes_with_sfx,
+                    }
+                    for s in state.scenes
+                ],
                 video_status="ready" if state.video_status == "ready" else "none",
+                assets=assets,
+                video_completeness=self._completeness(assets),
                 blueprint_summary=state.current_data.get("blueprint"),
                 editor_url=self._editor_url(state.project_name),
             )
@@ -255,6 +278,11 @@ class MockBackend:
             dup.completed_steps = list(src.completed_steps)
             dup.current_data = dict(src.current_data)
             dup.scenes = list(src.scenes)
+            # KAN-136 — duplicates inherit render state. Rerunning a render
+            # job on the copy is a separate submit_job call and re-stamps the
+            # set, so no stale-reference risk from sharing references here.
+            dup.completed_job_types = set(src.completed_job_types)
+            dup.scenes_with_sfx = set(src.scenes_with_sfx)
             self._projects[(user_id, new_id)] = dup
             return ProjectInfo(
                 project_id=new_id,
@@ -334,7 +362,7 @@ class MockBackend:
         params: dict[str, Any],
     ) -> str:
         with self._lock:
-            self._require(user_id, project_id)
+            state = self._require(user_id, project_id)
             job_id = str(uuid.uuid4())
             self._jobs[job_id] = JobStatus(
                 job_id=job_id,
@@ -343,6 +371,19 @@ class MockBackend:
                 progress=1.0,
                 result={"mock": True, "job_type": job_type, "params": params},
             )
+            # KAN-136 — record asset readiness. The mock collapses
+            # submit + completion into one call (real backend does this on
+            # job completion); this gives get_project + the KAN-130
+            # precondition check a deterministic source of truth.
+            state.completed_job_types.add(job_type)
+            if job_type == "generate_sfx":
+                # Real backend renders SFX per scene that had a
+                # sound_effect_analyzer result. The mock conservatively
+                # marks every existing scene; tests that need fine-grained
+                # behavior can poke ``state.scenes_with_sfx`` directly.
+                state.scenes_with_sfx.update(s.index for s in state.scenes)
+            if job_type == "compile_video":
+                state.video_status = "ready"
             return job_id
 
     def check_job(self, user_id: str, job_id: str) -> JobStatus:
@@ -477,3 +518,27 @@ class MockBackend:
         if len(state.completed_steps) == len(WORKFLOW_STEPS):
             return "completed"
         return "in_progress"
+
+    # KAN-136 — completeness rollup. ``title_card`` is intentionally
+    # excluded from the rollup until KAN-131 ships the renderer for it;
+    # ``ProjectAssets.title_card`` is plumbed in the schema so callers can
+    # write forward-compatible verification code, but a project today
+    # CAN be "complete" without it. Once KAN-131 adds the render path,
+    # include ``assets.title_card`` here.
+    _ROLLUP_KEYS: ClassVar[tuple[str, ...]] = ("music", "sfx", "thumbnail")
+
+    def _project_assets(self, state: _ProjectState) -> ProjectAssets:
+        return ProjectAssets(
+            music="generate_music" in state.completed_job_types,
+            sfx="generate_sfx" in state.completed_job_types,
+            thumbnail="generate_thumbnail" in state.completed_job_types,
+            title_card=False,  # see _ROLLUP_KEYS note
+        )
+
+    def _completeness(self, assets: ProjectAssets) -> VideoCompleteness:
+        flags = [getattr(assets, key) for key in self._ROLLUP_KEYS]
+        if all(flags):
+            return "complete"
+        if any(flags):
+            return "partial"
+        return "minimal"
