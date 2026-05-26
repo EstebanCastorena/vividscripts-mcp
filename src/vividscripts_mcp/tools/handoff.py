@@ -85,7 +85,33 @@ def make_get_video_download_url_tool(
     return get_video_download_url
 
 
+def make_get_thumbnail_download_url_tool(
+    backend: BackendProtocol,
+) -> Callable[[str], MagicLinkUrl]:
+    """Build the ``get_thumbnail_download_url`` tool bound to ``backend`` (KAN-132).
+
+    Mirrors :func:`make_get_video_download_url_tool`: the backend method
+    enforces "thumbnail must already be rendered" (raises ``LookupError``
+    otherwise), and the tool re-shapes the ``(url, expires_at)`` pair into
+    a :class:`MagicLinkUrl`.
+    """
+
+    def get_thumbnail_download_url(project_id: str) -> MagicLinkUrl:
+        """Return a short-lived signed URL to the rendered thumbnail PNG.
+
+        Requires ``generate_thumbnail`` to have completed for the project —
+        errors otherwise so the caller knows to run that job first. The URL
+        expires fast (≤1 hr); fetch it promptly. Returns ``{url, expires_at}``.
+        """
+        user_id = require_user_claims().sub
+        url, expires_at = backend.get_thumbnail_download_url(user_id=user_id, project_id=project_id)
+        return MagicLinkUrl(url=url, expires_at=expires_at)
+
+    return get_thumbnail_download_url
+
+
 def register_handoff_tools(mcp: FastMCP, backend: BackendProtocol) -> None:
     """Register the Phase-5 URL-handoff tools on the FastMCP server."""
     mcp.tool()(make_mint_magic_link_tool(backend))
     mcp.tool()(make_get_video_download_url_tool(backend))
+    mcp.tool()(make_get_thumbnail_download_url_tool(backend))

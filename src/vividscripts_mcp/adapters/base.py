@@ -143,3 +143,13 @@ class BackendProtocol(Protocol):
     def get_video_download_url(self, user_id: str, project_id: str) -> tuple[str, datetime]:
         """Return (signed_url, expires_at)."""
         ...
+
+    def get_thumbnail_download_url(self, user_id: str, project_id: str) -> tuple[str, datetime]:
+        """Return (signed_url, expires_at) for the rendered thumbnail PNG.
+
+        KAN-132. Must raise ``LookupError`` (surfaced by FastMCP as a clear
+        error response) when no thumbnail has been generated for the
+        project yet. The MCP tool ``get_thumbnail_download_url`` is a thin
+        wrapper around this — see ``tools/handoff.py``.
+        """
+        ...

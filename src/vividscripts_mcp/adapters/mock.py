@@ -493,6 +493,29 @@ class MockBackend:
             url = f"{self._base_url}/v/{token}/output.mp4"
             return url, expires_at
 
+    def get_thumbnail_download_url(self, user_id: str, project_id: str) -> tuple[str, datetime]:
+        # KAN-132. Refuse when no thumbnail has been rendered for the
+        # project yet — returning "okay, here's a URL" that 404s on fetch
+        # is exactly the silent-gap shape the 2026-05-26 post-mortem
+        # flagged. ``completed_job_types`` is populated by ``submit_job``
+        # (KAN-136), so the check is deterministic in the mock; the real
+        # backend would consult its job-completion records the same way.
+        with self._lock:
+            state = self._require(user_id, project_id)
+            if "generate_thumbnail" not in state.completed_job_types:
+                msg = (
+                    f"thumbnail not rendered for project {project_id!r}; "
+                    "run generate_thumbnail first"
+                )
+                raise LookupError(msg)
+            # KAN-97 #9 — same opaque-token discipline as
+            # ``get_video_download_url``; no user_id in the path, fresh
+            # token per call so the URL genuinely expires at ``expires_at``.
+            token = secrets.token_urlsafe(24)
+            expires_at = datetime.now(UTC) + timedelta(hours=1)
+            url = f"{self._base_url}/t/{token}/thumbnail.png"
+            return url, expires_at
+
     # ----- private helpers --------------------------------------------------
 
     def _next_step(self, state: _ProjectState) -> str | None:
