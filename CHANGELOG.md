@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`get_thumbnail_download_url` MCP tool (KAN-132)** — mirrors
+  `get_video_download_url`. Returns `{url, expires_at}` with a short-lived
+  signed URL to the rendered thumbnail PNG. Refuses with a clear
+  `LookupError` ("thumbnail not rendered for project …; run
+  generate_thumbnail first") when no thumbnail has been generated for the
+  project, so MCP-driven agents don't get a "successful" URL that 404s on
+  fetch. Same opaque-token discipline as the video download tool — fresh
+  token per call, no user_id in the URL. Companion `BackendProtocol`
+  method documented in `adapters/base.py`. Closes the "thumbnail file
+  exists server-side but no MCP tool can retrieve it" gap surfaced by
+  the 2026-05-26 post-mortem.
+
 - **Per-asset render status on `get_project` (KAN-136)** — `ProjectDetail`
   now carries a `ProjectAssets` block (`music`, `sfx`, `thumbnail`,
   `title_card`) and a `video_completeness` rollup (`complete` / `partial`
