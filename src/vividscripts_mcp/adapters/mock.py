@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar, Literal
 
 from vividscripts_mcp.models import (
+    CompileReadiness,
     JobStatus,
     MusicSelection,
     ProjectAssets,
@@ -169,6 +170,11 @@ class _ProjectState:
         # ``completed``.
         self.completed_job_types: set[str] = set()
         self.scenes_with_sfx: set[int] = set()
+        # KAN-130 — in-flight render jobs for this project. The mock's
+        # ``submit_job`` completes synchronously so this stays empty in
+        # normal use; tests that need to simulate the running-jobs branch
+        # of ``check_compile_readiness`` poke this directly.
+        self.running_job_types: set[str] = set()
 
 
 class MockBackend:
@@ -392,6 +398,40 @@ class MockBackend:
             msg = f"job {job_id!r} not found"
             raise KeyError(msg)
         return job
+
+    # KAN-130 — asset-class → job-type mapping. Anchored here (not in the
+    # tool layer) so the public ``check_compile_readiness`` model speaks
+    # asset-class names without leaking the ``generate_*`` vocabulary.
+    # ``title_card`` is intentionally absent — no renderer exists yet
+    # (KAN-131); when it lands, add the entry and bump the rollup in
+    # ``_completeness`` to match.
+    _COMPILE_REQUIRED_ASSETS: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("music", "generate_music"),
+        ("sfx", "generate_sfx"),
+        ("thumbnail", "generate_thumbnail"),
+    )
+
+    def check_compile_readiness(self, user_id: str, project_id: str) -> CompileReadiness:
+        with self._lock:
+            state = self._require(user_id, project_id)
+            missing: list[str] = []
+            running: list[str] = []
+            for asset, job_type in self._COMPILE_REQUIRED_ASSETS:
+                # The mock's ``submit_job`` completes synchronously, so
+                # ``running_job_types`` is normally empty — but the field
+                # is plumbed so a real backend (or a test that pokes the
+                # state directly) can report in-flight jobs. Running
+                # takes precedence over missing: an asset that's actively
+                # rendering shouldn't also be reported as missing.
+                if job_type in state.running_job_types:
+                    running.append(asset)
+                elif job_type not in state.completed_job_types:
+                    missing.append(asset)
+            return CompileReadiness(
+                ready=not missing and not running,
+                missing=missing,
+                running=running,
+            )
 
     #: Stand-in for the shared music catalog (the real adapter reads
     #: assets/music/music-catalog.json). Only "dark-tension" ships with

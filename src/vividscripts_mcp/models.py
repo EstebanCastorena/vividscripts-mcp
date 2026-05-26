@@ -212,6 +212,28 @@ class MagicLinkUrl(BaseModel):
     expires_at: datetime
 
 
+class CompileReadiness(BaseModel):
+    """Returned by ``BackendProtocol.check_compile_readiness`` (KAN-130).
+
+    Tells the ``compile_video`` tool whether every optional audio/visual
+    layer the pipeline expects is bound before it kicks off the FFmpeg
+    assembly. ``ready`` is just the convenience rollup
+    (``not missing and not running``).
+
+    ``missing`` and ``running`` carry asset-class names (``"music"``,
+    ``"sfx"``, ``"thumbnail"``) rather than ``generate_*`` job-type strings
+    so the tool layer can present them to callers without leaking the
+    job-type vocabulary. ``title_card`` is excluded until KAN-131 ships
+    the renderer.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool
+    missing: list[str] = Field(default_factory=list)
+    running: list[str] = Field(default_factory=list)
+
+
 class MusicSelection(BaseModel):
     """Returned by select_music (a synchronous catalog lookup).
 
