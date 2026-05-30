@@ -12,9 +12,12 @@ from vividscripts_mcp.adapters.mock import MockBackend
 from vividscripts_mcp.models import ProjectSettings, StepResultOutcome, WorkflowState
 from vividscripts_mcp.oauth.bearer import UserClaims
 from vividscripts_mcp.oauth.context import AuthRequired, set_user_claims
+from vividscripts_mcp.schemas import KNOWN_STEPS
 from vividscripts_mcp.tools.state import (
     CustomOverride,
     OverrideAck,
+    StepSchema,
+    get_step_schema,
     make_get_custom_prompt_override_tool,
     make_get_workflow_state_tool,
     make_save_step_result_tool,
@@ -137,6 +140,51 @@ def test_save_is_user_scoped(backend: MockBackend, project_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# get_step_schema (KAN-106)
+# ---------------------------------------------------------------------------
+
+
+def test_get_step_schema_returns_schema_for_known_step() -> None:
+    out = get_step_schema("story_blueprint")
+    assert isinstance(out, StepSchema)
+    assert out.step_name == "story_blueprint"
+    assert out.found is True
+    assert out.json_schema is not None
+    # It's a real JSON Schema with the step's required fields.
+    assert out.json_schema.get("type") == "object"
+    props = out.json_schema.get("properties", {})
+    assert isinstance(props, dict) and "creative_direction" in props
+    # known_steps is the complete catalog regardless of which step was asked.
+    assert set(out.known_steps) == set(KNOWN_STEPS)
+
+
+def test_get_step_schema_lists_steps_when_name_omitted() -> None:
+    out = get_step_schema()
+    assert out.step_name is None
+    assert out.found is False
+    assert out.json_schema is None
+    assert set(out.known_steps) == set(KNOWN_STEPS)
+    # Sorted for stable output.
+    assert out.known_steps == sorted(out.known_steps)
+
+
+def test_get_step_schema_unknown_step_lists_valid_names() -> None:
+    out = get_step_schema("not_a_real_step")
+    assert out.step_name == "not_a_real_step"
+    assert out.found is False
+    assert out.json_schema is None
+    # Caller self-corrects without another round-trip.
+    assert "story_blueprint" in out.known_steps
+
+
+def test_get_step_schema_needs_no_auth() -> None:
+    # No claims set — the catalog is public, so this must not raise.
+    set_user_claims(None)
+    out = get_step_schema("title_generator")
+    assert out.found is True
+
+
+# ---------------------------------------------------------------------------
 # get_workflow_state
 # ---------------------------------------------------------------------------
 
@@ -227,6 +275,7 @@ async def test_all_state_tools_registered(backend: MockBackend) -> None:
     names = {t.name for t in await mcp.list_tools()}
     assert {
         "save_step_result",
+        "get_step_schema",
         "get_workflow_state",
         "get_custom_prompt_override",
         "set_custom_prompt_override",
