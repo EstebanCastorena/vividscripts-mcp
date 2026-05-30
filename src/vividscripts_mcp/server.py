@@ -111,14 +111,32 @@ def create_mcp_server(
     DNS-rebinding allow-list is configured for the real deployment host;
     offline keeps FastMCP's localhost auto-protection (tests/dev run on
     127.0.0.1).
+
+    The transport runs in **stateless** mode (KAN-123). FastMCP's default
+    stateful mode keeps a per-client :class:`StreamableHTTPServerTransport`
+    in the session manager's ``_server_instances`` table, backed by a task
+    running the MCP loop. A transient transport drop mid-call tears that
+    task down and evicts the session, so the client's *next* request — even
+    one carrying a perfectly valid Bearer token — hits "Session not found"
+    (HTTP 404) and the whole tool group goes dark for the rest of the
+    conversation. That is exactly the unrecoverable mid-pipeline failure
+    seen in the 2026-05-25 end-to-end test. Stateless mode removes session
+    tracking entirely: every request builds a fresh transport and is
+    authorized solely by its Bearer token (bound per-request by
+    :class:`BearerEnforcementMiddleware`), so a dropped connection can
+    never strand the client and a retry simply succeeds. This server has no
+    stateful-session needs — no progress notifications, no server-initiated
+    messages; async media jobs are polled via ``check_job`` and all
+    workflow state is persisted backend-side.
     """
     if cognito is not None:
         mcp = FastMCP(
             SERVER_NAME,
+            stateless_http=True,
             transport_security=_broker_transport_security(cognito),
         )
     else:
-        mcp = FastMCP(SERVER_NAME)
+        mcp = FastMCP(SERVER_NAME, stateless_http=True)
 
     # KAN-53 project tools — user-scoped, Bearer-authenticated.
     mcp.tool()(make_create_project_tool(backend))
