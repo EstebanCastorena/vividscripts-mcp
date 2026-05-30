@@ -1,12 +1,19 @@
-"""Workflow-state + custom-override tools (KAN-59).
+"""Workflow-state + custom-override tools (KAN-59, KAN-106).
 
-Four user-scoped MCP tools:
+Five MCP tools (four user-scoped + the unauthenticated
+``get_step_schema``):
 
 - ``save_step_result`` — the gate between Claude Code's reasoning and
   persisted state. It schema-validates ``result`` against the step's
   canonical JSON Schema (KAN-57) **before** the backend is touched. A
   validation failure returns ``success=False`` + field-level
   ``validation_errors`` and persists nothing.
+- ``get_step_schema`` — surfaces the JSON Schema a step's ``result``
+  must satisfy, so a caller can learn the exact fields and types up
+  front instead of discovering them through ``save_step_result``
+  validation errors (KAN-106). Unauthenticated: the schema catalog is
+  static and public (it ships in this repo), the same for every caller
+  — consistent with ``list_workflow_steps``.
 - ``get_workflow_state`` — current pipeline position, enough to resume
   mid-workflow.
 - ``get_custom_prompt_override`` / ``set_custom_prompt_override`` — a
@@ -32,7 +39,7 @@ from vividscripts_mcp.adapters.base import BackendProtocol
 from vividscripts_mcp.models import StepResultOutcome, WorkflowState
 from vividscripts_mcp.oauth.context import require_user_claims
 from vividscripts_mcp.prompts import PROMPT_INTERFACES
-from vividscripts_mcp.schemas import validate_step_result
+from vividscripts_mcp.schemas import KNOWN_STEPS, get_output_schema, validate_step_result
 
 # KAN-97 #10 — bound the custom-prompt template. 50_000 chars covers any
 # legitimate template (the longest shipped prompt is ~3k chars) while
@@ -57,6 +64,55 @@ class OverrideAck(BaseModel):
     success: bool
 
 
+class StepSchema(BaseModel):
+    """Returned by get_step_schema (KAN-106).
+
+    ``found`` is True when ``step_name`` matched a known step and
+    ``json_schema`` carries the JSON Schema its ``result`` must satisfy.
+    When ``step_name`` is omitted or unknown, ``found`` is False,
+    ``json_schema`` is None, and ``known_steps`` lists every valid name
+    so the caller can self-correct without another round-trip.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_name: str | None
+    found: bool
+    json_schema: dict[str, object] | None
+    known_steps: list[str]
+
+
+def get_step_schema(step_name: str | None = None) -> StepSchema:
+    """Return the JSON Schema a step's ``result`` must satisfy in save_step_result.
+
+    Call this *before* ``save_step_result`` to learn the exact required
+    fields and types instead of discovering them through validation
+    errors. Field names are deliberately inconsistent across steps (they
+    mirror the backend processors — e.g. ``image_instruction`` for
+    ``image_director_first`` but ``image_prompt`` for ``thumbnail``), so
+    checking the schema is the reliable path rather than guessing.
+
+    Omit ``step_name`` — or pass an unknown one — to get every valid step
+    name back in ``known_steps``. No auth required; the catalog is the
+    same for every caller.
+    """
+    known = sorted(KNOWN_STEPS)
+    if step_name is None:
+        return StepSchema(
+            step_name=None,
+            found=False,
+            json_schema=None,
+            known_steps=known,
+        )
+    schema = get_output_schema(step_name)
+    return StepSchema(
+        step_name=step_name,
+        found=schema is not None,
+        json_schema=schema,
+        known_steps=known,
+    )
+
+
 def make_save_step_result_tool(
     backend: BackendProtocol,
 ) -> Callable[[str, str, dict[str, object], int | None], StepResultOutcome]:
@@ -69,6 +125,10 @@ def make_save_step_result_tool(
         scene_index: int | None = None,
     ) -> StepResultOutcome:
         """Validate an AI step result against its schema, then persist it.
+
+        Call ``get_step_schema(step_name)`` first to see the exact
+        required fields and types — field naming is inconsistent across
+        steps, so guessing wastes round-trips.
 
         Returns ``success=False`` with ``validation_errors`` (and saves
         nothing) when the result doesn't match the step's JSON Schema.
@@ -161,8 +221,9 @@ def make_set_custom_prompt_override_tool(
 
 
 def register_state_tools(mcp: FastMCP, backend: BackendProtocol) -> None:
-    """Register the four state tools on the FastMCP server."""
+    """Register the state tools on the FastMCP server."""
     mcp.tool()(make_save_step_result_tool(backend))
+    mcp.tool()(get_step_schema)
     mcp.tool()(make_get_workflow_state_tool(backend))
     mcp.tool()(make_get_custom_prompt_override_tool(backend))
     mcp.tool()(make_set_custom_prompt_override_tool(backend))

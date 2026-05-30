@@ -126,6 +126,23 @@ Persists an AI step result for a project. Validates the result against the step'
 }
 ```
 
+#### `get_step_schema`
+
+Returns the JSON Schema a step's `result` must satisfy in `save_step_result`. Call it *before* `save_step_result` to learn the exact required fields and types up front, instead of discovering them through validation errors. Field names are deliberately inconsistent across steps (they mirror the backend processors — e.g. `image_instruction` for `image_director_first` but `image_prompt` for `thumbnail`), so checking the schema is the reliable path rather than guessing. Omit `step_name` — or pass an unknown one — to get every valid step name back in `known_steps`. No auth required; the catalog is the same for every caller.
+
+<!-- gen-tools:start name=get_step_schema -->
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `step_name` | `string | null` | no | — |
+<!-- gen-tools:end -->
+
+```json
+{ "method": "tools/call",
+  "params": { "name": "get_step_schema", "arguments": { "step_name": "story_blueprint" } } }
+```
+
+The response is `{ step_name, found, json_schema, known_steps }` — `found` is `true` with the schema in `json_schema` for a known step; for an omitted or unknown name, `found` is `false` and `known_steps` lists every valid step.
+
 #### `get_workflow_state`
 
 Returns the project's current pipeline position — `status`, `completed_steps`, `current_step`, accumulated `current_data` (blueprint, scenes, bibles, etc.). Enough state to resume a workflow mid-flight if Claude Code is restarted. If your MCP session dies mid-pipeline, ask Claude to use the [`resume_project`](prompts.md#resume_project-documentation-kan-127) prompt — it walks you through picking up where the previous session left off, starting with `list_projects` and this tool.
@@ -288,6 +305,9 @@ Final FFmpeg pass: stitches scenes + audio + SFX + music into the final MP4. Req
 | Param | Type | Required | Description |
 |---|---|---|---|
 | `project_id` | `string` | yes | — |
+| `skip_music` | `boolean` | no | — |
+| `skip_sfx` | `boolean` | no | — |
+| `skip_thumbnail` | `boolean` | no | — |
 <!-- gen-tools:end -->
 
 ```json

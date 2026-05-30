@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`get_step_schema` MCP tool (KAN-106)** — surfaces the JSON Schema a
+  step's `result` must satisfy in `save_step_result`, so a caller can
+  learn the exact required fields and types up front instead of
+  discovering them through validation errors (the 2026-05-24 smoke test
+  needed ~37 `save_step_result` calls to land 17 correct payloads).
+  `get_step_schema(step_name)` returns `{step_name, found, json_schema,
+  known_steps}`; calling it with no argument — or an unknown step —
+  returns `found=False` with the full `known_steps` list so the caller
+  self-corrects without another round-trip. Unauthenticated, like
+  `list_workflow_steps`: the schema catalog is static and public. The
+  `save_step_result` tool description now points at it. (The output
+  schema was already embedded in the `prompts/get` response; this makes
+  it independently fetchable for agents that call `save_step_result`
+  without first rendering the prompt.) No change to `save_step_result`
+  validation behavior.
+
 - **`compile_video` precondition checks (KAN-130)** — `compile_video`
   now reads `check_compile_readiness` before submitting the job and
   refuses with a `ValueError` ("compile_video preconditions not met —
