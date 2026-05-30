@@ -60,7 +60,7 @@ The server uses the MCP primitives as the spec intends.
 | Workflow state | `save_step_result`, `get_workflow_state`, `list_workflow_steps` | schema-validates results before persisting |
 | Custom prompts | `set_custom_prompt_override`, `get_custom_prompt_override` | rejects unknown step names |
 | Media (async) | `generate_audio`, `generate_images`, `generate_sfx`, `generate_thumbnail`, `animate_scene`, `generate_music`, `compile_video`, `regenerate_scene_image`, `regenerate_scene_audio` | return `job_id`; poll `check_job` |
-| Media (sync) | `select_music`, `check_job` | |
+| Media (sync) | `check_job` | |
 | Scenes | `get_scenes`, `get_scene`, `update_scene_prompt`, `update_scene_text`, `add_scene`, `remove_scene` | bidirectional with the editor |
 | Handoff | `mint_magic_link`, `get_video_download_url` | short-lived signed URLs |
 

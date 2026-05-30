@@ -70,8 +70,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backend survives, a fresh MCP client against it can resume from any
   previous client's state. Prompt count: 19 → 20.
 
+### Changed
+
+- **`generate_music` now takes a required `mood` argument (KAN-126).**
+  Signature is now `generate_music(project_id, mood)`. The tool records
+  the mood on the project (the job the former `select_music` did) and
+  starts the music render in a single call, then returns a `job_id` to
+  poll with `check_job` as before. The job reuses a catalog track when
+  one exists for the mood, or synthesizes a new one. Cold-start projects
+  no longer need a separate `select_music` round-trip before music can be
+  generated. `BackendProtocol.select_music` is unchanged and is still
+  called internally to persist the mood, so the real backend needs no
+  change.
+
 ### Removed
 
+- **`select_music` MCP tool (KAN-126)** — folded into `generate_music`
+  (see Changed above). On cold projects it was a pure probe: the catalog
+  is empty for any not-pre-rendered mood, so the call only ever told the
+  caller to *also* run `generate_music` — an extra round-trip every
+  project paid for free. Its sole side effect (recording the mood) now
+  happens inside `generate_music`. The `BackendProtocol.select_music`
+  method and the `MusicSelection` model are intentionally retained — the
+  former is invoked internally by `generate_music`; only the standalone
+  MCP tool is gone. Net public surface drops one tool (Prompts
+  unchanged). Tool-count tallies in `docs/` are reconciled under KAN-129.
 - **`animate_scene` MCP tool** and the **`motion_direction` Prompt** are no
   longer part of the public MCP surface. The Kling image-to-video animation
   step is the cost-dominant operation in the pipeline (per-second video-model

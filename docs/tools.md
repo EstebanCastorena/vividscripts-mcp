@@ -267,17 +267,19 @@ Image-to-video animation for the project's intro scenes — Kling-style motion d
 
 #### `generate_music`
 
-Synthesizes a background-music track for the project's chosen mood. Requires `select_music` to have recorded the mood first; if the catalog already has a track for the mood, this is a no-op and `check_job` reports immediately complete.
+Records the chosen `mood` on the project and starts a background-music job for it — one call, no separate `select_music` step (KAN-126). The job reuses a catalog track when one already exists for the mood, or synthesizes a new one. Async: returns a `job_id`; poll `check_job`.
 
 <!-- gen-tools:start name=generate_music -->
 | Param | Type | Required | Description |
 |---|---|---|---|
 | `project_id` | `string` | yes | — |
+| `mood` | `string` | yes | — |
 <!-- gen-tools:end -->
 
 ```json
 { "method": "tools/call",
-  "params": { "name": "generate_music", "arguments": { "project_id": "Knocking_Inside" } } }
+  "params": { "name": "generate_music",
+              "arguments": { "project_id": "Knocking_Inside", "mood": "uneasy_strings" } } }
 ```
 
 #### `compile_video`
@@ -293,23 +295,6 @@ Final FFmpeg pass: stitches scenes + audio + SFX + music into the final MP4. Req
 ```json
 { "method": "tools/call",
   "params": { "name": "compile_video", "arguments": { "project_id": "Knocking_Inside" } } }
-```
-
-#### `select_music`
-
-Synchronous catalog lookup (not a job): records the chosen `mood` on the project and reports which catalog tracks already exist for it. If `needs_generation` is true, follow up with `generate_music` to synthesize tracks for the mood.
-
-<!-- gen-tools:start name=select_music -->
-| Param | Type | Required | Description |
-|---|---|---|---|
-| `project_id` | `string` | yes | — |
-| `mood` | `string` | yes | — |
-<!-- gen-tools:end -->
-
-```json
-{ "method": "tools/call",
-  "params": { "name": "select_music",
-              "arguments": { "project_id": "Knocking_Inside", "mood": "uneasy_strings" } } }
 ```
 
 #### `regenerate_scene_image`

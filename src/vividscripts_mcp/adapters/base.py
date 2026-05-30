@@ -112,12 +112,16 @@ class BackendProtocol(Protocol):
         ...
 
     def select_music(self, user_id: str, project_id: str, mood: str) -> MusicSelection:
-        """Choose a background-music mood for the project (synchronous).
+        """Record a background-music mood for the project (synchronous).
 
         Not a job: records ``mood`` on the project and reports what the
         shared catalog already has. ``needs_generation`` is true when no
-        tracks exist for the mood yet — the caller then runs the
-        ``generate_music`` job.
+        tracks exist for the mood yet.
+
+        No longer a standalone MCP tool (KAN-126): the ``generate_music``
+        tool calls this internally to persist the mood before submitting
+        the render job, so callers reach it in one round-trip. Kept on the
+        protocol because the music render step reads the recorded mood.
         """
         ...
 

@@ -101,8 +101,8 @@ Tool call: generate_audio { project_id: "Knocking_Inside" }
   → job_id=job_aud_91a7
 Tool call: generate_images { project_id: "Knocking_Inside" }
   → job_id=job_img_4f02
-Tool call: select_music { project_id: ..., mood: "uneasy_strings" }
-  → needs_generation: false
+Tool call: generate_music { project_id: ..., mood: "uneasy_strings" }
+  → job_id=job_mus_2c3d
 [Claude polls check_job; progress streams back in chat]
 ```
 

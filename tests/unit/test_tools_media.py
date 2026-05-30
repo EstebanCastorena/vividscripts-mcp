@@ -7,7 +7,7 @@ from collections.abc import Iterator
 import pytest
 
 from vividscripts_mcp.adapters.mock import MockBackend
-from vividscripts_mcp.models import JobStatus, MusicSelection, ProjectSettings
+from vividscripts_mcp.models import JobStatus, ProjectSettings
 from vividscripts_mcp.oauth.bearer import UserClaims
 from vividscripts_mcp.oauth.context import AuthRequired, set_user_claims
 from vividscripts_mcp.tools.media import (
@@ -21,7 +21,6 @@ from vividscripts_mcp.tools.media import (
     make_generate_thumbnail_tool,
     make_regenerate_scene_audio_tool,
     make_regenerate_scene_image_tool,
-    make_select_music_tool,
 )
 
 # animate_scene factory dropped 2026-05-25 (Test 2 post-mortem): the MCP tool
@@ -31,12 +30,15 @@ from vividscripts_mcp.tools.media import (
 #
 # compile_video factory pulled out (KAN-130): it now enforces preconditions
 # and has a different call shape (skip_* kwargs). Tested separately below.
+#
+# generate_music pulled out (KAN-126): it now takes a required ``mood`` arg
+# (the former select_music probe was folded in), so it can't ride the generic
+# single-arg parametrized cases. Tested separately below.
 _GENERATE_FACTORIES = [
     (make_generate_audio_tool, "generate_audio"),
     (make_generate_images_tool, "generate_images"),
     (make_generate_sfx_tool, "generate_sfx"),
     (make_generate_thumbnail_tool, "generate_thumbnail"),
-    (make_generate_music_tool, "generate_music"),
 ]
 
 
@@ -128,30 +130,49 @@ def test_all_generate_tools_require_auth(
         factory(backend)(project_id)
 
 
-def test_select_music_is_synchronous_and_records_mood(
+# ---------------------------------------------------------------------------
+# KAN-126 — generate_music: mood is a required arg; the former synchronous
+# select_music probe is folded in (records mood + submits the job in one call).
+# ---------------------------------------------------------------------------
+
+
+def test_generate_music_returns_job_handle_and_records_mood(
     backend: MockBackend, project_id: str, _auth: None
 ) -> None:
-    sel = make_select_music_tool(backend)(project_id, "dark-tension")
-    assert isinstance(sel, MusicSelection)
-    assert sel.mood == "dark-tension"
-    assert sel.available_tracks  # the mock catalog has dark-tension tracks
-    assert sel.needs_generation is False
-    # Mood is now recorded on the project.
+    sub = make_generate_music_tool(backend)(project_id, "dark-tension")
+    assert isinstance(sub, JobSubmission)
+    assert sub.job_id
+    assert sub.job_type == "generate_music"
+    # The job is pollable by the same backend.
+    assert make_check_job_tool(backend)(sub.job_id).job_type == "generate_music"
+    # And the mood was recorded on the project as part of the single call —
+    # no separate select_music round-trip needed (KAN-126).
     detail = backend.get_project("user-alpha", project_id)
     assert detail.metadata["settings"]["music_mood"] == "dark-tension"
 
 
-def test_select_music_unknown_mood_needs_generation(
+def test_generate_music_works_on_cold_project_in_one_call(
     backend: MockBackend, project_id: str, _auth: None
 ) -> None:
-    sel = make_select_music_tool(backend)(project_id, "whimsical-jazz")
-    assert sel.available_tracks == []
-    assert sel.needs_generation is True
+    """A brand-new project lands a music job with a single call, even for a
+    mood the catalog has no pre-rendered tracks for (the cold-start case that
+    used to cost a no-op select_music probe first — KAN-126)."""
+    sub = make_generate_music_tool(backend)(project_id, "whimsical-jazz")
+    assert sub.job_type == "generate_music"
+    detail = backend.get_project("user-alpha", project_id)
+    assert detail.metadata["settings"]["music_mood"] == "whimsical-jazz"
 
 
-def test_select_music_requires_auth(backend: MockBackend, project_id: str) -> None:
+def test_generate_music_empty_mood_raises(
+    backend: MockBackend, project_id: str, _auth: None
+) -> None:
+    with pytest.raises(ValueError, match="mood"):
+        make_generate_music_tool(backend)(project_id, "")
+
+
+def test_generate_music_requires_auth(backend: MockBackend, project_id: str) -> None:
     with pytest.raises(AuthRequired):
-        make_select_music_tool(backend)(project_id, "dark-tension")
+        make_generate_music_tool(backend)(project_id, "dark-tension")
 
 
 @pytest.mark.parametrize(
