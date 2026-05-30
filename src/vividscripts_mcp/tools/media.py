@@ -21,7 +21,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict
 
 from vividscripts_mcp.adapters.base import BackendProtocol
-from vividscripts_mcp.models import JobStatus, MusicSelection
+from vividscripts_mcp.models import JobStatus
 from vividscripts_mcp.oauth.context import require_user_claims
 
 
@@ -152,19 +152,36 @@ def make_generate_thumbnail_tool(
 
 def make_generate_music_tool(
     backend: BackendProtocol,
-) -> Callable[[str], JobSubmission]:
-    """Build the ``generate_music`` tool bound to ``backend`` (KAN-71)."""
+) -> Callable[[str, str], JobSubmission]:
+    """Build the ``generate_music`` tool bound to ``backend`` (KAN-71, KAN-126).
 
-    def generate_music(project_id: str) -> JobSubmission:
-        """Start background-music synthesis for the project's mood.
+    KAN-126 merged the former synchronous ``select_music`` probe into this
+    tool. ``mood`` is now a required argument: the tool records it on the
+    project, then starts the job — one MCP round-trip instead of two. The
+    job picks a matching catalog track when one exists for the mood, or
+    synthesizes a new one otherwise.
+    """
+
+    def generate_music(project_id: str, mood: str) -> JobSubmission:
+        """Pick or synthesize background music for ``mood``.
 
         Async — returns a ``job_id`` immediately; poll ``check_job``.
-        Requires a mood: call ``select_music`` first.
+        ``mood`` is a free-text descriptor (e.g. ``"dark-tension"``,
+        ``"tender-hopeful"``); the backend reuses a catalog track for the
+        mood when one exists or synthesizes a new one. This is the single
+        entry point for music — the old ``select_music`` probe was folded
+        in (KAN-126).
 
         Present as one line:
         ``Music job started: <job_id> — poll check_job for progress.``
         """
         user_id = require_user_claims().sub
+        # Record the chosen mood on the project before submitting the job;
+        # the backend's music step reads it. (Pre-KAN-126 this was a
+        # separate ``select_music`` MCP call.) Raises ValueError on empty
+        # mood. The catalog probe in the return value is intentionally
+        # discarded — the job handles pick-or-synthesize.
+        backend.select_music(user_id=user_id, project_id=project_id, mood=mood)
         job_id = backend.submit_job(
             user_id=user_id,
             project_id=project_id,
@@ -271,22 +288,13 @@ def make_compile_video_tool(
     return compile_video
 
 
-def make_select_music_tool(
-    backend: BackendProtocol,
-) -> Callable[[str, str], MusicSelection]:
-    """Build the ``select_music`` tool bound to ``backend`` (KAN-71)."""
-
-    def select_music(project_id: str, mood: str) -> MusicSelection:
-        """Choose a background-music mood for the project (synchronous).
-
-        Not a job — returns immediately. Records ``mood`` and reports
-        the catalog tracks already available. If ``needs_generation``
-        is true, run ``generate_music`` to synthesize tracks for it.
-        """
-        user_id = require_user_claims().sub
-        return backend.select_music(user_id=user_id, project_id=project_id, mood=mood)
-
-    return select_music
+# NOTE (KAN-126): the standalone ``select_music`` MCP tool was removed. On
+# cold projects it was a pure probe — it always reported needs_generation=True
+# and just told the caller to also run ``generate_music``, costing an extra
+# round-trip every project. Its mood-recording job is now done inside
+# ``generate_music(project_id, mood)`` (see above). The backend capability
+# ``BackendProtocol.select_music`` is intentionally kept — generate_music calls
+# it internally — so the real adapter needs no change.
 
 
 def make_regenerate_scene_image_tool(
@@ -368,7 +376,7 @@ def register_media_tools(mcp: FastMCP, backend: BackendProtocol) -> None:
     # animate_scene intentionally NOT registered — see note above.
     mcp.tool()(make_generate_music_tool(backend))
     mcp.tool()(make_compile_video_tool(backend))
-    mcp.tool()(make_select_music_tool(backend))
+    # select_music tool removed (KAN-126) — folded into generate_music.
     mcp.tool()(make_regenerate_scene_image_tool(backend))
     mcp.tool()(make_regenerate_scene_audio_tool(backend))
     mcp.tool()(make_check_job_tool(backend))
