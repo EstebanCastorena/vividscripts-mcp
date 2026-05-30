@@ -163,8 +163,10 @@ curl -s -X POST http://127.0.0.1:8000/oauth/token \
   -d "code_verifier=$VERIFIER" | jq
 
 # 8. Call the MCP endpoint with the Bearer token. The MCP wire flow is
-#    initialize → notifications/initialized → tools/call. The Mcp-Session-Id
-#    header from initialize must be echoed on subsequent calls.
+#    initialize → notifications/initialized → tools/call. The transport is
+#    stateless (KAN-123): initialize issues no Mcp-Session-Id, and none is
+#    echoed on later calls — each request stands alone on its Bearer token,
+#    so a dropped connection never strands the client mid-pipeline.
 curl -i -X POST http://127.0.0.1:8000/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \

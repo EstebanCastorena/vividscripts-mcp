@@ -291,7 +291,9 @@ def _list_project_names(http: TestClient, token: str) -> list[str]:
         },
     )
     assert init.status_code == 200, init.text
-    headers["Mcp-Session-Id"] = init.headers["Mcp-Session-Id"]
+    # Stateless transport (KAN-123): no Mcp-Session-Id to echo — each
+    # request is authorized solely by its Bearer token, which is exactly
+    # the isolation boundary this test asserts.
     notif = http.post(
         "/mcp",
         headers=headers,

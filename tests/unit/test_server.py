@@ -31,6 +31,30 @@ def test_mcp_endpoint_mounted() -> None:
     assert response.status_code != 404
 
 
+def test_server_runs_stateless() -> None:
+    """The transport is stateless in both offline and broker modes (KAN-123).
+
+    Stateless mode is what makes the server survive a transient transport
+    drop mid-pipeline: there is no server-side session to evict, so the
+    client's next Bearer-authenticated call simply succeeds instead of
+    hitting "Session not found" (HTTP 404). A refactor that drops
+    ``stateless_http=True`` would silently reintroduce that bug, so pin it
+    here as well as at the wire level (``test_stateless_session_resilience``).
+    """
+    from vividscripts_mcp.oauth.cognito import CognitoConfig
+
+    assert create_mcp_server(MockBackend()).settings.stateless_http is True
+
+    cognito = CognitoConfig(
+        issuer="https://cognito-idp.us-east-1.amazonaws.com/us-east-1_test",
+        client_id="test-client",
+        client_secret="super-secret",
+        hosted_ui_domain="https://auth.vividscripts.ai/",
+        public_base_url="https://vividscripts.ai/",
+    )
+    assert create_mcp_server(MockBackend(), cognito).settings.stateless_http is True
+
+
 async def test_list_workflow_steps_tool_is_registered() -> None:
     """The list_workflow_steps tool is exposed via FastMCP's tool catalog."""
     mcp = create_mcp_server(MockBackend())

@@ -11,10 +11,16 @@ exact dance Claude Code performs:
   5. GET  /oauth/authorize                → 302 to /_mock_idp/login
   6. POST /_mock_idp/login                → 302 to redirect_uri with ?code=
   7. POST /oauth/token                    → 200 + access_token + refresh_token
-  8. POST /mcp (initialize, with Bearer)  → 200 + Mcp-Session-Id (SSE)
+  8. POST /mcp (initialize, with Bearer)  → 200 SSE, NO Mcp-Session-Id
   9. POST /mcp (notifications/initialized)→ 202 Accepted
   10.POST /mcp (tools/call create_project)→ 200 SSE with the project info
   11.Backend has the project, owned by the authenticated user.
+
+The server runs in **stateless** mode (KAN-123): initialize returns no
+``Mcp-Session-Id`` and none is echoed on later calls. Every request is a
+self-contained, Bearer-authenticated transaction, so a dropped connection
+can never strand the client mid-pipeline. The stateless contract itself
+is pinned by ``test_stateless_session_resilience`` below.
 
 The test runs end-to-end against the real ASGI app via Starlette's
 TestClient. The base_url is ``http://127.0.0.1:8000`` (not the default
@@ -38,8 +44,8 @@ debugging or for showing the dance to a reviewer):
 
 3. POST /oauth/register, then walk steps 4-10 above with curl. The MCP
    wire calls require Accept: application/json, text/event-stream and
-   Content-Type: application/json — Step 8's response carries the
-   Mcp-Session-Id header you'll echo back on steps 9 and 10.
+   Content-Type: application/json. In stateless mode there is no
+   Mcp-Session-Id to echo — every call stands alone on its Bearer token.
 """
 
 from __future__ import annotations
@@ -225,6 +231,7 @@ def test_full_oauth_to_create_project(
     # -----------------------------------------------------------------
     # Step 8: MCP initialize handshake. The Bearer guards /mcp, so this
     # is where KAN-52's validator gets exercised against a real token.
+    # In stateless mode (KAN-123) the server issues NO Mcp-Session-Id.
     # -----------------------------------------------------------------
     mcp_headers = {
         "Accept": "application/json, text/event-stream",
@@ -246,17 +253,18 @@ def test_full_oauth_to_create_project(
         },
     )
     assert init_response.status_code == 200
-    mcp_session_id = init_response.headers.get("Mcp-Session-Id")
-    assert mcp_session_id, "FastMCP must issue a session id on initialize"
+    assert init_response.headers.get("Mcp-Session-Id") is None, (
+        "stateless transport must not issue a session id (KAN-123)"
+    )
     init_payload = _parse_sse_message(init_response.text)
     assert init_payload["id"] == 1
     assert init_payload["result"]["serverInfo"]["name"] == "vividscripts-mcp"
 
     # -----------------------------------------------------------------
-    # Step 9: initialized notification (the spec requires this before
-    # any tool/resource calls).
+    # Step 9: initialized notification. A real client still sends it;
+    # statelessly it's just another self-contained request (no session
+    # id to echo).
     # -----------------------------------------------------------------
-    mcp_headers["Mcp-Session-Id"] = mcp_session_id
     notif_response = http.post(
         "/mcp",
         headers=mcp_headers,
@@ -342,3 +350,150 @@ def test_bearer_with_invalid_token_blocks_mcp(http: TestClient) -> None:
     )
     assert response.status_code == 401
     assert 'error="invalid_token"' in response.headers["WWW-Authenticate"]
+
+
+def _obtain_access_token(
+    http: TestClient, stores: dict[str, Any], *, user_id: str = "user-alpha"
+) -> str:
+    """Run the OAuth dance compactly and return a usable Bearer access token.
+
+    The full, documented step-by-step version lives in
+    ``test_full_oauth_to_create_project``; this is the same flow condensed
+    so other integration tests can get an authenticated token without
+    re-narrating every RFC step.
+    """
+    session = stores["session_store"].create(user_id=user_id)
+    http.cookies.set(SESSION_COOKIE_NAME, session.session_id)
+    client_id = http.post(
+        "/oauth/register",
+        json={"redirect_uris": [_REDIRECT_URI], "client_name": "Claude Code"},
+    ).json()["client_id"]
+
+    verifier, challenge = _pkce_pair()
+    auth = http.get(
+        "/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": _REDIRECT_URI,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "state": "csrf",
+        },
+        follow_redirects=False,
+    )
+    request_id = urllib.parse.parse_qs(urllib.parse.urlparse(auth.headers["location"]).query)[
+        "request_id"
+    ][0]
+    login = http.post(
+        "/_mock_idp/login",
+        data={"request_id": request_id, "user_id": user_id},
+        follow_redirects=False,
+    )
+    code = urllib.parse.parse_qs(urllib.parse.urlparse(login.headers["location"]).query)["code"][0]
+    token = http.post(
+        "/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": client_id,
+            "redirect_uri": _REDIRECT_URI,
+            "code_verifier": verifier,
+        },
+    )
+    return token.json()["access_token"]  # type: ignore[no-any-return]
+
+
+def test_stateless_session_resilience(
+    http: TestClient,
+    backend: MockBackend,
+    stores: dict[str, Any],
+) -> None:
+    """Regression for KAN-123 — a dropped/expired session can't strand a client.
+
+    Reproduces the 2026-05-25 ("Test 2") failure shape. In the old
+    *stateful* transport, a transient mid-call transport drop tore down the
+    session task and evicted it from the manager; the client's next request
+    — still carrying the now-dead ``Mcp-Session-Id`` — got HTTP 404
+    "Session not found", and the whole vividscripts tool group went dark for
+    the rest of the conversation.
+
+    Under the stateless transport (KAN-123) there is no session to lose.
+    This test pins two halves of that contract against the real ASGI wire:
+
+      1. A ``tools/call`` carrying a *stale/unknown* ``Mcp-Session-Id`` (what
+         a client clings to right after a drop) still succeeds — it is NOT
+         rejected with 404 "Session not found".
+      2. Two independent ``tools/call`` requests with NO session continuity
+         between them both succeed on the Bearer token alone.
+
+    Together: a connection drop mid-pipeline followed by a plain retry of an
+    idempotent read recovers without a fresh OAuth flow.
+    """
+    access_token = _obtain_access_token(http, stores)
+    base_headers = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
+
+    # First call seeds a project to read back later (idempotently).
+    create = http.post(
+        "/mcp",
+        headers=base_headers,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "create_project",
+                "arguments": {
+                    "story": "A tiny robot named Bolt found a dandelion.",
+                    "settings": {
+                        "style": "vintage_illustrated",
+                        "voice": "male",
+                        "dimension": "landscape",
+                    },
+                },
+            },
+        },
+    )
+    assert create.status_code == 200, create.text
+    project_id = _parse_sse_message(create.text)["result"]["structuredContent"]["project_id"]
+
+    # (1) Simulate the post-drop retry: the client still echoes a session id
+    # from before the connection died. Stateless mode must ignore it, not
+    # 404. This is the exact byte that used to kill the conversation.
+    stale_headers = {**base_headers, "Mcp-Session-Id": "dead-session-from-before-the-drop"}
+    recovered = http.post(
+        "/mcp",
+        headers=stale_headers,
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "get_project", "arguments": {"project_id": project_id}},
+        },
+    )
+    assert recovered.status_code == 200, (
+        f"stale session id must not 404 the client (KAN-123): {recovered.text}"
+    )
+    recovered_payload = _parse_sse_message(recovered.text)
+    assert "error" not in recovered_payload, recovered_payload
+    assert recovered_payload["result"]["structuredContent"]["project_id"] == project_id
+
+    # (2) A second fully-independent call (no session id at all) also works,
+    # proving no server-side session continuity is required between calls.
+    listing = http.post(
+        "/mcp",
+        headers=base_headers,
+        json={
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "list_projects", "arguments": {}},
+        },
+    )
+    assert listing.status_code == 200, listing.text
+    listing_payload = _parse_sse_message(listing.text)
+    assert "error" not in listing_payload, listing_payload
